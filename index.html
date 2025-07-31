@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ScanAuditor - Medical Records Analysis</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fas fa-stethoscope"></i>
+                    <h1>ScanAuditor</h1>
+                </div>
+                <div class="status-indicator">
+                    <div class="status-item">
+                        <span class="status-label">Backend:</span>
+                        <span id="backend-status" class="status-badge">Checking...</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">Ollama:</span>
+                        <span id="ollama-status" class="status-badge">Checking...</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- File Selection Section -->
+            <section class="file-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-folder-open"></i> File Selection</h2>
+                    <p>Select medical record files to analyze</p>
+                </div>
+                
+                <div class="file-upload-area" id="file-upload-area">
+                    <div class="upload-content">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <h3>Select Files</h3>
+                        <p>Click to browse or drag and drop medical record files</p>
+                        <button class="btn btn-primary" id="select-files-btn">
+                            <i class="fas fa-folder"></i> Browse Files
+                        </button>
+                    </div>
+                </div>
+
+                <div class="selected-files" id="selected-files" style="display: none;">
+                    <h3>Selected Files</h3>
+                    <div class="file-list" id="file-list"></div>
+                    <div class="file-actions">
+                        <button class="btn btn-secondary" id="clear-files-btn">
+                            <i class="fas fa-trash"></i> Clear All
+                        </button>
+                        <button class="btn btn-success" id="analyze-files-btn">
+                            <i class="fas fa-play"></i> Analyze Files
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Analysis Results Section -->
+            <section class="results-section" id="results-section" style="display: none;">
+                <div class="section-header">
+                    <h2><i class="fas fa-chart-bar"></i> Analysis Results</h2>
+                    <p>Results of medical record analysis</p>
+                </div>
+                
+                <div class="results-container">
+                    <div class="results-summary" id="results-summary"></div>
+                    <div class="results-details" id="results-details"></div>
+                </div>
+            </section>
+
+            <!-- Loading Overlay -->
+            <div class="loading-overlay" id="loading-overlay" style="display: none;">
+                <div class="loading-content">
+                    <div class="spinner"></div>
+                    <h3>Analyzing Files...</h3>
+                    <p>Please wait while we process your medical records</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html> 
