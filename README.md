@@ -1,188 +1,183 @@
-# ScanAuditor - Medical Records Analysis Tool
+# ScanAuditor - Comprehensive Medical Document Analysis
 
-A professional Electron application for analyzing medical records using AI-powered analysis with Ollama's qwen2.5vl:7b model.
+ScanAuditor is an advanced medical document analysis tool that uses AI to comprehensively analyze scanned handwritten medical records for data integrity, quality issues, and compliance.
+
+## New Analysis Strategy
+
+ScanAuditor now uses a comprehensive multi-stage analysis approach:
+
+### 1. **PaddleOCR for Handwriting Recognition**
+- Uses PaddleOCR (fastest open-source OCR for handwriting)
+- Extracts text from all pages of scanned documents
+- Optimized for medical handwriting recognition
+- Processes entire documents, not just individual pages
+
+### 2. **Gemma 3n 4b for Text Analysis**
+- Analyzes extracted text for patient identifiers
+- Detects multiple patients in single files
+- Identifies date mismatches and inconsistencies
+- Validates data integrity across all pages
+
+### 3. **Gemma 3n 4b for Image Analysis**
+- Analyzes image quality and document structure
+- Detects blurry, dark, or unreadable pages
+- Identifies missing pages and duplicates
+- Checks page orientation and completeness
+
+### 4. **Comprehensive Report Generation**
+- Generates detailed safety assessments
+- Provides specific recommendations
+- Creates actionable compliance reports
+- Determines if files are safe for use
 
 ## Features
 
-- **Multi-file Analysis**: Analyze multiple medical record files simultaneously
-- **AI-Powered Analysis**: Uses Ollama's qwen2.5vl:7b model for intelligent document analysis
-- **Patient Name Matching**: Verifies patient names match filenames
-- **Single Patient Validation**: Ensures documents contain records for one patient only
-- **Modern UI**: Clean, professional interface with real-time status indicators
-- **Drag & Drop Support**: Easy file selection with drag and drop functionality
-- **Comprehensive Results**: Detailed analysis results with confidence scores and issue identification
+- **Multi-Page Analysis**: Processes entire documents, not just individual pages
+- **Handwriting Recognition**: Advanced OCR optimized for medical handwriting
+- **Data Integrity Checks**: Validates patient identifiers, dates, and consistency
+- **Quality Assessment**: Evaluates image quality and document completeness
+- **Safety Assessment**: Determines if documents are safe for clinical use
+- **Comprehensive Reporting**: Detailed reports with specific recommendations
 
-## Analysis Parameters
+## Report Format
 
-The application analyzes medical records for:
+Each analysis generates a comprehensive report including:
 
-1. **Patient Name Extraction**: Identifies patient names within documents
-2. **Filename Matching**: Verifies patient names match the filename
-3. **Single Patient Check**: Ensures only one patient name appears in the document
-4. **One Patient Only**: Confirms the document contains records for one patient only
-5. **Issue Detection**: Identifies discrepancies and potential problems
-6. **Confidence Scoring**: Provides confidence levels for analysis accuracy
-
-## Prerequisites
-
-- **Node.js** (v16 or higher)
-- **Ollama** installed and running locally
-- **qwen2.5vl:7b model** available in Ollama
+1. **File Information**: Name, scan date, total pages
+2. **Summary Table**: Quick overview of all detected issues
+3. **Detailed Findings**: 
+   - Image quality issues (blurry, dark, unreadable pages)
+   - Page sequence issues (missing, duplicate, misoriented pages)
+   - Data extraction issues (missing identifiers, multiple patients, date mismatches)
+4. **Recommendations**: Specific actions needed
+5. **Safety Assessment**: Whether the file is safe for use
+6. **Immediate Actions**: Critical issues requiring attention
 
 ## Installation
 
-1. **Clone or download the project**:
+### Prerequisites
+- Node.js (v16 or higher)
+- Python 3.8 or higher
+- Ollama (with gemma3n:latest model)
+
+### Setup
+
+1. **Clone the repository**
    ```bash
    git clone <repository-url>
    cd ScanAuditor
    ```
 
-2. **Install dependencies**:
+2. **Install Node.js dependencies**
    ```bash
    npm install
    ```
 
-3. **Install Ollama** (if not already installed):
-   - Visit [https://ollama.ai](https://ollama.ai)
-   - Download and install for your operating system
-   - Start Ollama service
-
-4. **Pull the required model**:
+3. **Set up Python environment**
    ```bash
-   ollama pull qwen2.5vl:7b
+   # Windows (Command Prompt)
+   setup_python_env.bat
+   
+   # Windows (PowerShell)
+   .\setup_python_env.ps1
    ```
 
-## Usage
-
-### Starting the Application
-
-1. **Development mode**:
+4. **Install Ollama models**
    ```bash
-   npm run dev
+   ollama pull gemma3n:latest
    ```
 
-2. **Production mode**:
+5. **Start the application**
    ```bash
    npm start
    ```
 
-### Using the Application
+## Usage
 
-1. **Launch the app** - The application will automatically:
-   - Start the backend server on port 3001
-   - Connect to Ollama service
-   - Initialize the qwen2.5vl:7b model
+1. **Launch ScanAuditor**
+   - The application will start and connect to Ollama
+   - Status indicators show connection status
 
-2. **Select Files**:
-   - Click "Browse Files" to select medical record files
-   - Or drag and drop files onto the upload area
-   - Supported formats: TXT, PDF, DOC, DOCX
+2. **Upload Documents**
+   - Drag and drop PDF files or click to select
+   - Supports multi-page scanned documents
+   - Handles handwritten medical records
 
-3. **Analyze Files**:
-   - Click "Analyze Files" to start the analysis
-   - The application will process each file using the AI model
-   - Progress is shown with a loading overlay
+3. **Analysis Process**
+   - Documents are converted to images
+   - PaddleOCR extracts text from all pages
+   - Gemma 3n analyzes text for data integrity
+   - Gemma 3n analyzes images for quality issues
+   - Comprehensive report is generated
 
-4. **Review Results**:
-   - View summary statistics (total files, passed/failed, average confidence)
-   - Examine detailed results for each file
-   - Check for issues and discrepancies
+4. **Review Results**
+   - View summary statistics
+   - Examine detailed findings
+   - Check safety assessment
+   - Follow recommendations
 
-## Status Indicators
+## Analysis Criteria
 
-The application provides real-time status indicators:
+### Files Considered UNSAFE:
+- Missing patient identifiers on multiple/all pages
+- Pages from multiple patients mixed together
+- Critical date mismatches (e.g., discharge before admission)
+- Missing critical information affecting patient care
 
-- **Backend Status**: Shows if the local server is running
-- **Ollama Status**: Indicates connection to the Ollama service
-
-## File Analysis Process
-
-1. **File Upload**: Files are uploaded to the backend server
-2. **Content Extraction**: Text content is extracted from the files
-3. **AI Analysis**: The qwen2.5vl:7b model analyzes the content
-4. **Result Processing**: Analysis results are processed and formatted
-5. **Display**: Results are displayed in the user interface
-
-## Analysis Results
-
-Each file analysis includes:
-
-- **Patient Name**: Extracted patient name from the document
-- **Filename Match**: Whether the patient name matches the filename
-- **Single Patient**: Whether only one patient name appears in the document
-- **One Patient Only**: Whether the document contains records for one patient only
-- **Confidence**: AI model's confidence in the analysis (0-100%)
-- **Issues**: List of any problems or discrepancies found
-
-## Building for Distribution
-
-To create a distributable application:
-
-```bash
-npm run build
-```
-
-This will create platform-specific installers in the `dist` folder.
-
-## Troubleshooting
-
-### Ollama Connection Issues
-
-1. **Ensure Ollama is running**:
-   ```bash
-   ollama serve
-   ```
-
-2. **Check model availability**:
-   ```bash
-   ollama list
-   ```
-
-3. **Pull the model if missing**:
-   ```bash
-   ollama pull qwen2.5vl:7b
-   ```
-
-### Backend Server Issues
-
-1. **Check if port 3001 is available**
-2. **Restart the application**
-3. **Check console logs for error messages**
-
-### File Analysis Issues
-
-1. **Ensure files are in supported formats**
-2. **Check file permissions**
-3. **Verify file content is readable**
-
-## Security Considerations
-
-- Files are processed locally on your machine
-- No data is sent to external servers (except Ollama API calls)
-- Temporary files are stored locally and cleaned up automatically
-- The application runs in a sandboxed Electron environment
+### Files Considered SAFE:
+- Minor quality issues that don't affect identification
+- Single missing identifier with clear context
+- Duplicate pages (when correct page is present)
+- Minor orientation issues (readable content)
 
 ## Technical Details
 
-- **Frontend**: HTML5, CSS3, JavaScript (ES6+)
-- **Backend**: Node.js with Express.js
-- **Desktop Framework**: Electron
-- **AI Model**: Ollama qwen2.5vl:7b
-- **File Processing**: Multer for file uploads
-- **UI Framework**: Custom CSS with modern design principles
+### OCR Technology
+- **PaddleOCR**: Fastest open-source OCR for handwriting
+- **Optimized Settings**: Configured for medical documents
+- **Multi-language Support**: English medical terminology
+- **Image Preprocessing**: Enhanced contrast and noise reduction
+
+### AI Models
+- **Gemma 3n 4b**: Google's latest open-source model
+- **Text Analysis**: Patient identification and data validation
+- **Image Analysis**: Quality assessment and document structure
+- **Local Processing**: All analysis done locally via Ollama
+
+### Performance
+- **Fast Processing**: PaddleOCR provides rapid text extraction
+- **Accurate Recognition**: Optimized for medical handwriting
+- **Comprehensive Analysis**: Multi-stage validation process
+- **Detailed Reporting**: Actionable insights and recommendations
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Python Environment Setup**
+   - Ensure Python 3.8+ is installed
+   - Run setup script as administrator if needed
+   - Check virtual environment activation
+
+2. **Ollama Connection**
+   - Ensure Ollama is running
+   - Verify gemma3n:latest model is installed
+   - Check port 11434 is available
+
+3. **PaddleOCR Installation**
+   - May take time to download models
+   - Requires sufficient disk space
+   - Check internet connection during setup
+
+### Support
+- Check logs in the application console
+- Verify all dependencies are installed
+- Ensure sufficient system resources
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Support
-
-For issues and questions:
-1. Check the troubleshooting section
-2. Review console logs for error messages
-3. Ensure all prerequisites are properly installed
-4. Verify Ollama service is running and accessible
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit pull requests or open issues for bugs and feature requests. 
+Contributions are welcome! Please feel free to submit a Pull Request. 

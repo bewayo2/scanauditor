@@ -45,18 +45,27 @@ const setupEventListeners = () => {
 // File selection handler
 const handleFileSelection = async () => {
     try {
+        console.log('Opening file selection dialog...');
         const filePaths = await window.electronAPI.selectFiles();
+        console.log('Selected files:', filePaths);
+        
         if (filePaths && filePaths.length > 0) {
             addFilesToSelection(filePaths);
+            showNotification(`Selected ${filePaths.length} file(s)`, 'success');
+        } else {
+            showNotification('No files selected', 'info');
         }
     } catch (error) {
         console.error('Error selecting files:', error);
-        showNotification('Error selecting files', 'error');
+        showNotification('Error selecting files: ' + error.message, 'error');
     }
 };
 
 // Add files to selection
 const addFilesToSelection = (filePaths) => {
+    console.log('Adding files to selection:', filePaths);
+    
+    let addedCount = 0;
     filePaths.forEach(filePath => {
         const fileName = filePath.split(/[\\/]/).pop();
         const file = {
@@ -67,11 +76,48 @@ const addFilesToSelection = (filePaths) => {
         
         if (!selectedFiles.find(f => f.path === filePath)) {
             selectedFiles.push(file);
+            addedCount++;
+            console.log('Added file:', fileName);
+        } else {
+            console.log('File already selected:', fileName);
         }
     });
     
+    console.log(`Added ${addedCount} new files. Total selected: ${selectedFiles.length}`);
     updateFileList();
     showSelectedFiles();
+};
+
+// Add dropped files to selection (for drag and drop)
+const addDroppedFilesToSelection = (files) => {
+    console.log('Adding dropped files to selection:', files);
+    
+    let addedCount = 0;
+    files.forEach(file => {
+        const fileInfo = {
+            path: file.name, // Use name as path for dropped files
+            name: file.name,
+            size: file.size,
+            file: file // Store the actual file object
+        };
+        
+        if (!selectedFiles.find(f => f.name === file.name)) {
+            selectedFiles.push(fileInfo);
+            addedCount++;
+            console.log('Added dropped file:', file.name);
+        } else {
+            console.log('Dropped file already selected:', file.name);
+        }
+    });
+    
+    console.log(`Added ${addedCount} new dropped files. Total selected: ${selectedFiles.length}`);
+    updateFileList();
+    showSelectedFiles();
+};
+
+// Add more files function
+const addMoreFiles = () => {
+    handleFileSelection();
 };
 
 // Update file list display
@@ -97,6 +143,16 @@ const updateFileList = () => {
         
         fileList.appendChild(fileItem);
     });
+    
+    // Add "Add More Files" button
+    const addMoreButton = document.createElement('div');
+    addMoreButton.className = 'add-more-files';
+    addMoreButton.innerHTML = `
+        <button class="btn btn-primary" onclick="addMoreFiles()">
+            <i class="fas fa-plus"></i> Add More Files
+        </button>
+    `;
+    fileList.appendChild(addMoreButton);
 };
 
 // Remove file from selection
@@ -128,6 +184,8 @@ const hideSelectedFiles = () => {
     fileUploadArea.style.display = 'block';
 };
 
+
+
 // Analyze selected files
 const analyzeSelectedFiles = async () => {
     if (selectedFiles.length === 0) {
@@ -141,9 +199,15 @@ const analyzeSelectedFiles = async () => {
         // Convert file paths to File objects
         const files = await Promise.all(
             selectedFiles.map(async (fileInfo) => {
-                const response = await fetch(`file://${fileInfo.path}`);
-                const blob = await response.blob();
-                return new File([blob], fileInfo.name, { type: blob.type });
+                if (fileInfo.file) {
+                    // This is a dropped file, use the stored File object
+                    return fileInfo.file;
+                } else {
+                    // This is a selected file path, convert to File object
+                    const response = await fetch(`file://${fileInfo.path}`);
+                    const blob = await response.blob();
+                    return new File([blob], fileInfo.name, { type: blob.type });
+                }
             })
         );
         
@@ -179,12 +243,12 @@ const displayResults = () => {
 // Display results summary
 const displayResultsSummary = () => {
     const totalFiles = analysisResults.length;
-    const singlePatientFiles = analysisResults.filter(r => 
-        !r.analysis.multiplePatients
+    const safeFiles = analysisResults.filter(r => 
+        r.analysis.safetyAssessment && r.analysis.safetyAssessment.safeForUse
     ).length;
-    const multiplePatientFiles = totalFiles - singlePatientFiles;
-    const totalHospitalNumbers = analysisResults.reduce((sum, r) => 
-        sum + (r.analysis.uniqueHospitalNumbers ? r.analysis.uniqueHospitalNumbers.length : 0), 0);
+    const unsafeFiles = totalFiles - safeFiles;
+    const totalIssues = analysisResults.reduce((sum, r) => 
+        sum + (r.analysis.summaryTable ? r.analysis.summaryTable.length : 0), 0);
     
     resultsSummary.innerHTML = `
         <div class="summary-stats">
@@ -193,16 +257,16 @@ const displayResultsSummary = () => {
                 <div class="stat-label">Total Files</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number">${singlePatientFiles}</div>
-                <div class="stat-label">Single Patient</div>
+                <div class="stat-number">${safeFiles}</div>
+                <div class="stat-label">Safe for Use</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number">${multiplePatientFiles}</div>
-                <div class="stat-label">Multiple Patients</div>
+                <div class="stat-number">${unsafeFiles}</div>
+                <div class="stat-label">Needs Review</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number">${totalHospitalNumbers}</div>
-                <div class="stat-label">Total Hospital Numbers</div>
+                <div class="stat-number">${totalIssues}</div>
+                <div class="stat-label">Total Issues</div>
             </div>
         </div>
     `;
@@ -218,9 +282,186 @@ const displayResultsDetails = () => {
         
         const analysis = result.analysis;
         
-        // Handle new format with pagesWithHospitalNumbers
-        if (analysis.pagesWithHospitalNumbers !== undefined) {
-            // New format - page-by-page hospital number analysis
+        // Handle comprehensive analysis format
+        if (analysis.fileInformation) {
+            // New comprehensive format
+            const isSafe = analysis.safetyAssessment && analysis.safetyAssessment.safeForUse;
+            const statusClass = isSafe ? 'pass' : 'fail';
+            const statusText = isSafe ? 'Safe for Use' : 'Needs Review';
+            const riskLevel = analysis.safetyAssessment ? analysis.safetyAssessment.riskLevel : 'unknown';
+            
+            // Build summary table
+            let summaryTableHtml = '';
+            if (analysis.summaryTable && analysis.summaryTable.length > 0) {
+                summaryTableHtml = `
+                    <div class="summary-table">
+                        <h4>Summary of Issues</h4>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Issue Type</th>
+                                    <th>Count</th>
+                                    <th>Pages Affected</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${analysis.summaryTable.map(issue => `
+                                    <tr>
+                                        <td>${issue.issueType}</td>
+                                        <td>${issue.count}</td>
+                                        <td>${issue.pagesAffected}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            }
+            
+            // Build detailed findings
+            let detailedFindingsHtml = '';
+            if (analysis.detailedFindings) {
+                const findings = analysis.detailedFindings;
+                
+                // Image quality issues
+                let imageQualityHtml = '';
+                if (findings.imageQualityIssues) {
+                    const iq = findings.imageQualityIssues;
+                    const imageIssues = [];
+                    if (iq.blurryPages && iq.blurryPages.length > 0) imageIssues.push(`Blurry: ${iq.blurryPages.join(', ')}`);
+                    if (iq.darkPages && iq.darkPages.length > 0) imageIssues.push(`Dark: ${iq.darkPages.join(', ')}`);
+                    if (iq.lightPages && iq.lightPages.length > 0) imageIssues.push(`Light: ${iq.lightPages.join(', ')}`);
+                    if (iq.unreadablePages && iq.unreadablePages.length > 0) imageIssues.push(`Unreadable: ${iq.unreadablePages.join(', ')}`);
+                    
+                    if (imageIssues.length > 0) {
+                        imageQualityHtml = `
+                            <div class="finding-section">
+                                <h5>Image Quality Issues</h5>
+                                ${imageIssues.map(issue => `<div class="issue-item">${issue}</div>`).join('')}
+                            </div>
+                        `;
+                    }
+                }
+                
+                // Page sequence issues
+                let pageSequenceHtml = '';
+                if (findings.pageSequence) {
+                    const ps = findings.pageSequence;
+                    const sequenceIssues = [];
+                    if (ps.missingPages && ps.missingPages.length > 0) sequenceIssues.push(`Missing: ${ps.missingPages.join(', ')}`);
+                    if (ps.duplicatePages && ps.duplicatePages.length > 0) {
+                        ps.duplicatePages.forEach(dup => {
+                            sequenceIssues.push(`Duplicates: ${dup.pages.join(' and ')}`);
+                        });
+                    }
+                    if (ps.orientationIssues) {
+                        const oi = ps.orientationIssues;
+                        if (oi.upsideDown && oi.upsideDown.length > 0) sequenceIssues.push(`Upside down: ${oi.upsideDown.join(', ')}`);
+                        if (oi.sideways && oi.sideways.length > 0) sequenceIssues.push(`Sideways: ${oi.sideways.join(', ')}`);
+                    }
+                    
+                    if (sequenceIssues.length > 0) {
+                        pageSequenceHtml = `
+                            <div class="finding-section">
+                                <h5>Page Sequence Issues</h5>
+                                ${sequenceIssues.map(issue => `<div class="issue-item">${issue}</div>`).join('')}
+                            </div>
+                        `;
+                    }
+                }
+                
+                // Data extraction issues
+                let dataExtractionHtml = '';
+                if (findings.dataExtraction) {
+                    const de = findings.dataExtraction;
+                    const dataIssues = [];
+                    if (de.pagesWithoutIdentifiers && de.pagesWithoutIdentifiers.length > 0) {
+                        dataIssues.push(`No identifiers: ${de.pagesWithoutIdentifiers.join(', ')}`);
+                    }
+                    if (de.multiplePatients && de.multiplePatients.detected) {
+                        dataIssues.push(`Multiple patients: ${de.multiplePatients.evidence}`);
+                    }
+                    if (de.dateMismatches && de.dateMismatches.length > 0) {
+                        de.dateMismatches.forEach(mismatch => {
+                            dataIssues.push(`Date issue: ${mismatch.description}`);
+                        });
+                    }
+                    
+                    if (dataIssues.length > 0) {
+                        dataExtractionHtml = `
+                            <div class="finding-section">
+                                <h5>Data Extraction Issues</h5>
+                                ${dataIssues.map(issue => `<div class="issue-item">${issue}</div>`).join('')}
+                            </div>
+                        `;
+                    }
+                }
+                
+                detailedFindingsHtml = imageQualityHtml + pageSequenceHtml + dataExtractionHtml;
+            }
+            
+            // Build recommendations
+            let recommendationsHtml = '';
+            if (analysis.recommendations) {
+                const rec = analysis.recommendations;
+                const recommendations = [];
+                if (rec.manualReview && rec.manualReview.length > 0) recommendations.push(`Manual review: ${rec.manualReview.join(', ')}`);
+                if (rec.rescanning && rec.rescanning.length > 0) recommendations.push(`Rescan: ${rec.rescanning.join(', ')}`);
+                if (rec.verification && rec.verification.length > 0) recommendations.push(`Verify: ${rec.verification.join(', ')}`);
+                if (rec.corrections && rec.corrections.length > 0) recommendations.push(`Correct: ${rec.corrections.join(', ')}`);
+                
+                if (recommendations.length > 0) {
+                    recommendationsHtml = `
+                        <div class="recommendations-section">
+                            <h4>Recommendations</h4>
+                            ${recommendations.map(rec => `<div class="recommendation-item">${rec}</div>`).join('')}
+                        </div>
+                    `;
+                }
+            }
+            
+            resultCard.innerHTML = `
+                <div class="result-header">
+                    <div class="result-filename">${analysis.fileInformation.fileName}</div>
+                    <div class="result-status ${statusClass}">${statusText}</div>
+                </div>
+                <div class="result-details">
+                    <div class="detail-item">
+                        <div class="detail-label">Scan Date</div>
+                        <div class="detail-value">${analysis.fileInformation.scanDate}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Total Pages</div>
+                        <div class="detail-value">${analysis.fileInformation.totalPages}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Risk Level</div>
+                        <div class="detail-value">${riskLevel}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">Compliance Status</div>
+                        <div class="detail-value">${analysis.complianceStatus || 'Unknown'}</div>
+                    </div>
+                </div>
+                ${summaryTableHtml}
+                ${detailedFindingsHtml ? `
+                    <div class="detailed-findings">
+                        <h4>Detailed Findings</h4>
+                        ${detailedFindingsHtml}
+                    </div>
+                ` : ''}
+                ${recommendationsHtml}
+                ${analysis.safetyAssessment && analysis.safetyAssessment.immediateActions && analysis.safetyAssessment.immediateActions.length > 0 ? `
+                    <div class="immediate-actions">
+                        <h4>Immediate Actions Required</h4>
+                        ${analysis.safetyAssessment.immediateActions.map(action => `
+                            <div class="action-item">${action}</div>
+                        `).join('')}
+                    </div>
+                ` : ''}
+            `;
+        } else if (analysis.pagesWithHospitalNumbers !== undefined) {
+            // Legacy format - page-by-page hospital number analysis
             const hasMultiplePatients = analysis.multiplePatients || false;
             const hasIssues = analysis.issues && analysis.issues.length > 0;
             const statusClass = hasMultiplePatients ? 'fail' : 'pass';
@@ -371,10 +612,14 @@ const handleFileDrop = (e) => {
     fileUploadArea.classList.remove('drag-over');
     
     const files = Array.from(e.dataTransfer.files);
-    const filePaths = files.map(file => file.path);
     
-    if (filePaths.length > 0) {
-        addFilesToSelection(filePaths);
+    if (files.length > 0) {
+        // For drag and drop, we'll add the files to the selection
+        // and show the file list instead of starting analysis immediately
+        showNotification(`Dropped ${files.length} file(s). Added to selection.`, 'success');
+        
+        // Add dropped files to selection
+        addDroppedFilesToSelection(files);
     }
 };
 

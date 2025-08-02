@@ -1,0 +1,34 @@
+MEDICAL RECORD - EMERGENCY DEPARTMENT
+
+Date: 15/12/2024
+Location: Emergency Department
+Provider: Dr. Michael Chen
+
+PATIENT 1:
+Patient Name: Mary Johnson
+Date of Birth: 22/07/1978
+Chief Complaint: Chest pain
+Assessment: Stable, discharged with follow-up
+
+PATIENT 2:
+Patient Name: Robert Davis
+Date of Birth: 10/11/1992
+Chief Complaint: Ankle injury
+Assessment: Sprain, treated and discharged
+
+PATIENT 3:
+Patient Name: Lisa Thompson
+Date of Birth: 05/09/1988
+Chief Complaint: Fever and cough
+Assessment: Upper respiratory infection, prescribed antibiotics
+
+TRIAGE NOTES:
+All patients were seen within 2 hours of arrival. No critical cases. Standard protocols followed.
+
+DISCHARGE SUMMARY:
+- Mary Johnson: Discharged at 14:30
+- Robert Davis: Discharged at 15:45
+- Lisa Thompson: Discharged at 16:20
+
+Signed: Dr. Michael Chen
+Date: 15/12/2024 

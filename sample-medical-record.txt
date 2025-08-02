@@ -1,0 +1,41 @@
+MEDICAL RECORD
+
+Patient Name: John Smith
+Date of Birth: 15/03/1985
+Medical Record Number: MR-2024-001
+
+Date of Visit: 15/12/2024
+Provider: Dr. Sarah Johnson
+
+CHIEF COMPLAINT:
+Patient presents with persistent headache and fatigue for the past 2 weeks.
+
+HISTORY OF PRESENT ILLNESS:
+Mr. Smith reports experiencing severe headaches, particularly in the morning hours. The pain is described as throbbing and localized to the frontal region. He also reports feeling unusually tired despite adequate sleep. No previous history of similar symptoms.
+
+PHYSICAL EXAMINATION:
+- Vital Signs: BP 140/90, HR 72, Temp 98.6°F, RR 16
+- General: Alert and oriented, appears fatigued
+- HEENT: Normocephalic, atraumatic
+- Cardiovascular: Regular rate and rhythm, no murmurs
+- Respiratory: Clear to auscultation bilaterally
+- Neurological: Cranial nerves II-XII intact
+
+ASSESSMENT:
+1. Tension headache
+2. Fatigue, unspecified
+
+PLAN:
+1. Prescribed ibuprofen 400mg TID for headache
+2. Recommended stress management techniques
+3. Follow-up appointment in 2 weeks
+4. Consider sleep study if symptoms persist
+
+MEDICATIONS:
+- Ibuprofen 400mg TID for 7 days
+
+FOLLOW-UP:
+Return in 2 weeks for re-evaluation.
+
+Signed: Dr. Sarah Johnson
+Date: 15/12/2024 

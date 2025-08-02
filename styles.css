@@ -285,6 +285,122 @@ body {
     backdrop-filter: blur(10px);
 }
 
+/* Summary Table Styles */
+.summary-table {
+    margin: 1.5rem 0;
+    background: #f8fafc;
+    border-radius: 8px;
+    padding: 1rem;
+    border: 1px solid #e2e8f0;
+}
+
+.summary-table h4 {
+    margin-bottom: 1rem;
+    color: #2d3748;
+    font-weight: 600;
+}
+
+.summary-table table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+.summary-table th,
+.summary-table td {
+    padding: 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.summary-table th {
+    background: #edf2f7;
+    font-weight: 600;
+    color: #4a5568;
+}
+
+.summary-table tr:hover {
+    background: #f7fafc;
+}
+
+/* Detailed Findings Styles */
+.detailed-findings {
+    margin: 1.5rem 0;
+}
+
+.detailed-findings h4 {
+    margin-bottom: 1rem;
+    color: #2d3748;
+    font-weight: 600;
+}
+
+.finding-section {
+    background: #f8fafc;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border-left: 4px solid #667eea;
+}
+
+.finding-section h5 {
+    margin-bottom: 0.75rem;
+    color: #4a5568;
+    font-weight: 600;
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Recommendations Styles */
+.recommendations-section {
+    margin: 1.5rem 0;
+    background: #f0fff4;
+    border-radius: 8px;
+    padding: 1rem;
+    border: 1px solid #c6f6d5;
+}
+
+.recommendations-section h4 {
+    margin-bottom: 1rem;
+    color: #22543d;
+    font-weight: 600;
+}
+
+.recommendation-item {
+    background: #c6f6d5;
+    color: #22543d;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+/* Immediate Actions Styles */
+.immediate-actions {
+    margin: 1.5rem 0;
+    background: #fff5f5;
+    border-radius: 8px;
+    padding: 1rem;
+    border: 1px solid #fed7d7;
+}
+
+.immediate-actions h4 {
+    margin-bottom: 1rem;
+    color: #742a2a;
+    font-weight: 600;
+}
+
+.action-item {
+    background: #fed7d7;
+    color: #742a2a;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
 .results-summary {
     margin-bottom: 2rem;
     padding-bottom: 2rem;
