@@ -325,7 +325,55 @@ const displayResultsDetails = () => {
             if (analysis.detailedFindings) {
                 const findings = analysis.detailedFindings;
                 
-                // Image quality issues
+                // Collect all positive findings
+                const allPositiveFindings = [];
+                
+                // Image quality findings
+                if (findings.imageQualityIssues && findings.imageQualityIssues.positiveFindings) {
+                    allPositiveFindings.push(...findings.imageQualityIssues.positiveFindings);
+                }
+                
+                // Page sequence findings
+                if (findings.pageSequence && findings.pageSequence.positiveFindings) {
+                    allPositiveFindings.push(...findings.pageSequence.positiveFindings);
+                }
+                
+                // Data extraction findings
+                if (findings.dataExtraction && findings.dataExtraction.positiveFindings) {
+                    allPositiveFindings.push(...findings.dataExtraction.positiveFindings);
+                }
+                
+                // Display positive findings
+                if (allPositiveFindings.length > 0) {
+                    const positiveFindingsHtml = allPositiveFindings.map(finding => {
+                        // Handle both string and object formats
+                        if (typeof finding === 'string') {
+                            return `<div class="finding-item positive">${finding}</div>`;
+                        } else if (finding.type && (finding.type === 'patient_name' || finding.type === 'hospital_id')) {
+                            // Handle privacy-protected findings
+                            return `
+                                <div class="finding-item positive privacy-protected" data-type="${finding.type}" data-value="${finding.value}">
+                                    <span class="finding-label">${finding.label}:</span>
+                                    <span class="privacy-mask">${finding.masked}</span>
+                                    <button class="privacy-toggle" onclick="togglePrivacy(this, '${finding.type}')">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            `;
+                        } else {
+                            return `<div class="finding-item positive">${finding}</div>`;
+                        }
+                    }).join('');
+                    
+                    detailedFindingsHtml = `
+                        <div class="finding-section">
+                            <h5>Detailed Findings</h5>
+                            ${positiveFindingsHtml}
+                        </div>
+                    `;
+                }
+                
+                // Image quality issues (only if there are actual issues)
                 let imageQualityHtml = '';
                 if (findings.imageQualityIssues) {
                     const iq = findings.imageQualityIssues;
@@ -345,12 +393,13 @@ const displayResultsDetails = () => {
                     }
                 }
                 
-                // Page sequence issues
+                // Page sequence issues (only if there are actual issues)
                 let pageSequenceHtml = '';
                 if (findings.pageSequence) {
                     const ps = findings.pageSequence;
                     const sequenceIssues = [];
-                    if (ps.missingPages && ps.missingPages.length > 0) sequenceIssues.push(`Missing: ${ps.missingPages.join(', ')}`);
+                    if (ps.cutoffPages && ps.cutoffPages.length > 0) sequenceIssues.push(`Cut-off: ${ps.cutoffPages.join(', ')}`);
+                    if (ps.incompletePages && ps.incompletePages.length > 0) sequenceIssues.push(`Incomplete: ${ps.incompletePages.join(', ')}`);
                     if (ps.duplicatePages && ps.duplicatePages.length > 0) {
                         ps.duplicatePages.forEach(dup => {
                             sequenceIssues.push(`Duplicates: ${dup.pages.join(' and ')}`);
@@ -360,6 +409,7 @@ const displayResultsDetails = () => {
                         const oi = ps.orientationIssues;
                         if (oi.upsideDown && oi.upsideDown.length > 0) sequenceIssues.push(`Upside down: ${oi.upsideDown.join(', ')}`);
                         if (oi.sideways && oi.sideways.length > 0) sequenceIssues.push(`Sideways: ${oi.sideways.join(', ')}`);
+                        if (oi.misaligned && oi.misaligned.length > 0) sequenceIssues.push(`Misaligned: ${oi.misaligned.join(', ')}`);
                     }
                     
                     if (sequenceIssues.length > 0) {
@@ -372,7 +422,7 @@ const displayResultsDetails = () => {
                     }
                 }
                 
-                // Data extraction issues
+                // Data extraction issues (only if there are actual issues)
                 let dataExtractionHtml = '';
                 if (findings.dataExtraction) {
                     const de = findings.dataExtraction;
@@ -389,6 +439,13 @@ const displayResultsDetails = () => {
                         });
                     }
                     
+                    // Add chronological issues
+                    if (de.chronologicalIssues && !de.chronologicalIssues.isChronological) {
+                        de.chronologicalIssues.issues.forEach(issue => {
+                            dataIssues.push(`Chronological issue: ${issue}`);
+                        });
+                    }
+                    
                     if (dataIssues.length > 0) {
                         dataExtractionHtml = `
                             <div class="finding-section">
@@ -399,8 +456,10 @@ const displayResultsDetails = () => {
                     }
                 }
                 
-                detailedFindingsHtml = imageQualityHtml + pageSequenceHtml + dataExtractionHtml;
+                detailedFindingsHtml += imageQualityHtml + pageSequenceHtml + dataExtractionHtml;
             }
+            
+
             
             // Build recommendations
             let recommendationsHtml = '';
@@ -725,5 +784,43 @@ const getNotificationColor = (type) => {
         case 'error': return '#e53e3e';
         case 'warning': return '#d69e2e';
         default: return '#3182ce';
+    }
+};
+
+// Privacy toggle function
+const togglePrivacy = (button, type) => {
+    // Handle both old structure (.info-value) and new structure (.privacy-protected)
+    const privacyElement = button.closest('.info-value') || button.closest('.privacy-protected');
+    const privacyMask = privacyElement.querySelector('.privacy-mask');
+    const icon = button.querySelector('i');
+    const actualValue = privacyElement.getAttribute('data-value');
+    const existingValueSpan = privacyElement.querySelector('.actual-value');
+    
+    if (privacyElement.classList.contains('revealed')) {
+        // Hide the value
+        privacyElement.classList.remove('revealed');
+        privacyMask.style.display = 'inline';
+        privacyMask.textContent = type === 'name' || type === 'patient_name' ? '••••••••••' : '••••••';
+        icon.className = 'fas fa-eye';
+        button.setAttribute('title', 'Click to reveal');
+        
+        // Remove the actual value span if it exists
+        if (existingValueSpan) {
+            existingValueSpan.remove();
+        }
+    } else {
+        // Show the value
+        privacyElement.classList.add('revealed');
+        privacyMask.style.display = 'none';
+        icon.className = 'fas fa-eye-slash';
+        button.setAttribute('title', 'Click to hide');
+        
+        // Show the actual value (only if it doesn't already exist)
+        if (!existingValueSpan) {
+            const valueSpan = document.createElement('span');
+            valueSpan.className = 'actual-value';
+            valueSpan.textContent = actualValue;
+            privacyElement.appendChild(valueSpan);
+        }
     }
 }; 

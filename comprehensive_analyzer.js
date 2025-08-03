@@ -81,7 +81,16 @@ class ComprehensiveAnalyzer {
       const base64Image = imageBuffer.toString('base64');
       console.log(`[OCR] Image converted to base64, length: ${base64Image.length} characters`);
       
-      const prompt = `Extract all text from this medical document image. Return ONLY the extracted text, no explanations or formatting. Focus on patient names (not doctor names), hospital numbers (5-6 digit numbers, no "MR" prefix), dates, medical notes, and any handwritten or printed text.`;
+      const prompt = `Extract all text from this medical document image. Return ONLY the extracted text, no explanations or formatting. 
+
+Focus on extracting text from these specific areas:
+1. Header section (top 1/3 of page) - look for "NAME" fields, "Hospital #" fields
+2. Patient information sections - patient names, hospital numbers (5-6 digit numbers)
+3. Medical notes and handwritten text
+4. Dates and vital signs
+5. All form fields and labels
+
+Extract everything you can read, including handwritten text, but prioritize the header section where patient identifiers are typically located.`;
       console.log(`[OCR] Sending request to Ollama with prompt length: ${prompt.length} characters`);
       
       console.log(`[OCR] Making API call to: ${this.ollamaBaseUrl}/api/generate`);
@@ -148,23 +157,73 @@ class ComprehensiveAnalyzer {
 Document: ${fileName}
 Text Content: ${fullText}
 
-Instructions:
-1. Find patient names (full names, not doctor names) and hospital numbers (5-6 digit numbers, no "MR" prefix)
-2. Focus on identifiers near the top of the page
-3. Check if document contains information for multiple patients
-4. Look for impossible date sequences (e.g., discharge before admission)
-5. Identify pages or sections without patient identifiers (name OR hospital number)
+CRITICAL RULES FOR PATIENT NAME IDENTIFICATION:
+1. PATIENT NAMES: ONLY extract names from fields explicitly labeled as:
+   - "NAME:" or "NAME"
+   - "Patient Name:" or "Patient Name"
+   - "Patient:" or "Patient"
+   - At the very top of medical forms where patient information is listed
 
-IMPORTANT: 
-- Hospital numbers are 5-6 digit numbers only (no "MR" prefix)
-- Do NOT include doctor names, MRNs, or patient IDs
-- We accept either a patient name OR hospital number per page
-- Respond with ONLY valid JSON. No additional text, explanations, or markdown formatting.
+2. ABSOLUTELY IGNORE these fields - they are NOT patient names:
+   - "Dr." or "Doctor" or "M.D." or "Physician" - these are DOCTOR names
+   - "Next of Kin" or "Emergency Contact" - these are FAMILY members
+   - "Nursing Staff" or "Nurse" - these are STAFF names
+   - "Signature" - these are SIGNATURES
+   - Any name that appears after "Dr.", "Doctor", "M.D.", "Physician"
+   - Any name that appears after "Next of Kin", "Emergency Contact"
+   - Any name that appears after "Nursing Staff", "Nurse"
+   - Any name that appears after "Signature"
+   - Placeholder text like "-----------------------", "_______________", or repeated dashes/underscores
+   - Text that is mostly numbers or special characters
 
+3. PATIENT NAME EXTRACTION RULES:
+   - Look ONLY in the header section (first 1/3 of the page)
+   - Extract ONLY ONE patient name per page - the FIRST name found in a "NAME:" field
+   - If you see "NAME: John Smith" - that's the patient (STOP looking for more names)
+   - If you see "Dr. Johnson" later - that's NOT the patient, ignore it
+   - If you see "Next of Kin: Mary Smith" - that's NOT the patient, ignore it
+   - If you see "Nursing Staff: Sarah Jones" - that's NOT the patient, ignore it
+   - If you see "-----------------------" or similar placeholder text - ignore it completely
+   - IMPORTANT: Return only the FIRST valid patient name found, not multiple names
+   - Handle name variations: "Gerard Hubert", "Gerard Adrian Hubert", "Hubert Gerard" might be the same person
+
+4. HOSPITAL NUMBER EXTRACTION:
+   - Look for 5-6 digit numbers in fields labeled "Hospital #", "Hospital Number", "Patient ID"
+   - The FIRST 6-digit number that appears is usually the hospital number
+   - Focus on the header section of medical forms
+   - IGNORE placeholder text like "-----------------------", "_______________", or repeated dashes/underscores
+   - IGNORE text that is mostly special characters or non-numeric content
+
+5. MULTIPLE PATIENT DETECTION:
+   - Only flag as multiple patients if you find DIFFERENT names in "NAME:" fields
+   - Same name appearing multiple times = single patient
+   - Different names in different sections (doctor, next of kin) = single patient
+   - Example: "NAME: John Smith" + "Dr. Johnson" = ONE patient (John Smith)
+   - Example: "NAME: John Smith" + "Next of Kin: Mary Smith" = ONE patient (John Smith)
+
+6. DATE EXTRACTION:
+   - Look for the date when the medical note was written
+   - PRIORITY: If "Admission Date" is found, use it as the primary date
+   - Common formats: DD/MM/YY, DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD-MM-YYYY
+   - Look for dates in fields like "DATE:", "Date:", "Note Date:", "Written:", "Document Date:", "Admission Date:"
+   - If no clearly identified date can be found on a page, do NOT mark it as missing - assume it's correctly scanned
+
+7. VALIDATION RULES:
+   - Hospital numbers are 5-6 digit numbers only (no "MR" prefix)
+   - ONLY count names in "NAME:" fields as patient names
+   - Doctor names, staff names, next of kin names are NEVER patient names
+   - Extract ONLY ONE patient name per page (the first valid one found)
+   - If the SAME patient name appears on multiple pages, count it as ONE patient
+   - We accept either a patient name OR hospital number per page
+   - DO NOT return multiple names for a single page
+
+RESPOND WITH ONLY VALID JSON. No additional text, explanations, or markdown formatting.
+
+EXAMPLE FORMAT (replace with actual data found):
 {
   "patientIdentifiers": {
-    "names": [],
-    "hospitalNumbers": []
+    "names": ["John Smith"],  // Only ONE name per page
+    "hospitalNumbers": ["123456"]  // Only ONE hospital number per page
   },
   "multiplePatients": {
     "detected": false,
@@ -173,7 +232,8 @@ IMPORTANT:
   },
   "dateIssues": {
     "mismatches": [],
-    "missingDates": []
+    "missingDates": [],
+    "pageDates": []
   },
   "pagesWithoutIdentifiers": [],
   "dataIntegrityScore": 0,
@@ -211,7 +271,107 @@ IMPORTANT:
           jsonText = jsonText.substring(jsonStart, jsonEnd + 1);
         }
         
-        return JSON.parse(jsonText);
+        const analysis = JSON.parse(jsonText);
+        
+        // POST-PROCESSING VALIDATION: Filter out non-patient names, handle variations, and ensure one name per page
+        if (analysis.patientIdentifiers && analysis.patientIdentifiers.names && analysis.patientIdentifiers.names.length > 0) {
+          const originalNames = [...analysis.patientIdentifiers.names];
+          
+          // First filter out non-patient names and placeholder text
+          const filteredNames = originalNames.filter(name => {
+            // Remove placeholder text (dashes, underscores, etc.)
+            if (name.match(/^[-_=\s]+$/) || name.includes('-----------------------') || name.includes('_______________')) {
+              console.log(`[TEXT] Filtered out placeholder text: ${name}`);
+              return false;
+            }
+            
+            // Remove doctor names
+            if (name.toLowerCase().includes('dr.') || 
+                name.toLowerCase().includes('doctor') || 
+                name.toLowerCase().includes('m.d.') ||
+                name.toLowerCase().includes('physician')) {
+              console.log(`[TEXT] Filtered out doctor name: ${name}`);
+              return false;
+            }
+            
+            // Remove names that are likely staff or next of kin
+            if (name.toLowerCase().includes('nurse') || 
+                name.toLowerCase().includes('staff') ||
+                name.toLowerCase().includes('signature')) {
+              console.log(`[TEXT] Filtered out staff/signature name: ${name}`);
+              return false;
+            }
+            
+            // Remove single names that are likely last names only
+            if (name.split(' ').length === 1 && name.length < 8) {
+              console.log(`[TEXT] Filtered out likely last name only: ${name}`);
+              return false;
+            }
+            
+            // Remove names that are mostly numbers or special characters
+            if (name.match(/^[0-9\s\-_=]+$/)) {
+              console.log(`[TEXT] Filtered out numeric/special character name: ${name}`);
+              return false;
+            }
+            
+            return true;
+          });
+          
+          // Handle name variations - consolidate similar names
+          const consolidatedNames = this.consolidateNameVariations(filteredNames);
+          
+          // Then ensure only one name per page (keep the first valid name found)
+          if (consolidatedNames.length > 1) {
+            console.log(`[TEXT] Multiple names detected after consolidation: ${consolidatedNames.join(', ')}`);
+            console.log(`[TEXT] Keeping only the first name: ${consolidatedNames[0]}`);
+            analysis.patientIdentifiers.names = [consolidatedNames[0]];
+          } else if (consolidatedNames.length === 1) {
+            analysis.patientIdentifiers.names = consolidatedNames;
+          } else {
+            analysis.patientIdentifiers.names = [];
+          }
+          
+          if (analysis.patientIdentifiers.names.length !== originalNames.length) {
+            console.log(`[TEXT] Post-processing result: ${originalNames.length} -> ${analysis.patientIdentifiers.names.length} names`);
+            console.log(`[TEXT] Final patient name(s):`, analysis.patientIdentifiers.names);
+          }
+        }
+
+        // POST-PROCESSING VALIDATION: Filter out placeholder text from hospital numbers
+        if (analysis.patientIdentifiers && analysis.patientIdentifiers.hospitalNumbers && analysis.patientIdentifiers.hospitalNumbers.length > 0) {
+          const originalNumbers = [...analysis.patientIdentifiers.hospitalNumbers];
+          
+          const filteredNumbers = originalNumbers.filter(number => {
+            // Remove placeholder text (dashes, underscores, etc.)
+            if (number.match(/^[-_=\s]+$/) || number.includes('-----------------------') || number.includes('_______________')) {
+              console.log(`[TEXT] Filtered out placeholder hospital number: ${number}`);
+              return false;
+            }
+            
+            // Remove text that is mostly special characters
+            if (number.match(/^[^0-9]+$/)) {
+              console.log(`[TEXT] Filtered out non-numeric hospital number: ${number}`);
+              return false;
+            }
+            
+            // Keep only numbers that look like actual hospital numbers (5-6 digits)
+            if (!number.match(/^\d{5,6}$/)) {
+              console.log(`[TEXT] Filtered out invalid hospital number format: ${number}`);
+              return false;
+            }
+            
+            return true;
+          });
+          
+          analysis.patientIdentifiers.hospitalNumbers = filteredNumbers;
+          
+          if (analysis.patientIdentifiers.hospitalNumbers.length !== originalNumbers.length) {
+            console.log(`[TEXT] Hospital number post-processing result: ${originalNumbers.length} -> ${analysis.patientIdentifiers.hospitalNumbers.length} numbers`);
+            console.log(`[TEXT] Final hospital number(s):`, analysis.patientIdentifiers.hospitalNumbers);
+          }
+        }
+        
+        return analysis;
       } catch (parseError) {
         console.error('JSON parse error:', parseError);
         console.error('Response text:', responseText);
@@ -239,6 +399,94 @@ IMPORTANT:
         criticalIssues: ['Analysis failed']
       };
     }
+  }
+
+  // Consolidate name variations to handle different formats of the same person's name
+  consolidateNameVariations(names) {
+    if (!names || names.length <= 1) {
+      return names;
+    }
+
+    console.log(`[TEXT] Consolidating name variations: ${names.join(', ')}`);
+    
+    const normalizedNames = names.map(name => ({
+      original: name,
+      normalized: this.normalizeName(name)
+    }));
+
+    const consolidated = [];
+    const processed = new Set();
+
+    for (let i = 0; i < normalizedNames.length; i++) {
+      if (processed.has(i)) continue;
+
+      const current = normalizedNames[i];
+      const similarNames = [current.original];
+
+      // Check for similar names
+      for (let j = i + 1; j < normalizedNames.length; j++) {
+        if (processed.has(j)) continue;
+
+        const other = normalizedNames[j];
+        if (this.areNamesSimilar(current.normalized, other.normalized)) {
+          similarNames.push(other.original);
+          processed.add(j);
+          console.log(`[TEXT] Found similar names: "${current.original}" and "${other.original}"`);
+        }
+      }
+
+      // Choose the best representation (prefer longer, more complete names)
+      const bestName = this.selectBestName(similarNames);
+      consolidated.push(bestName);
+      processed.add(i);
+    }
+
+    console.log(`[TEXT] Name consolidation result: ${names.length} -> ${consolidated.length} unique names`);
+    return consolidated;
+  }
+
+  // Normalize a name for comparison (remove extra spaces, convert to lowercase, etc.)
+  normalizeName(name) {
+    return name
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+      .replace(/[^\w\s]/g, ''); // Remove special characters except spaces
+  }
+
+  // Check if two normalized names are similar (same person with variations)
+  areNamesSimilar(name1, name2) {
+    if (name1 === name2) return true;
+
+    const words1 = name1.split(' ').filter(w => w.length > 0);
+    const words2 = name2.split(' ').filter(w => w.length > 0);
+
+    if (words1.length === 0 || words2.length === 0) return false;
+
+    // Check if they share at least 2 words (for names with 3+ words)
+    // or if they share at least 1 word (for shorter names)
+    const minSharedWords = Math.min(words1.length, words2.length) >= 3 ? 2 : 1;
+    
+    const sharedWords = words1.filter(word1 => 
+      words2.some(word2 => word2.includes(word1) || word1.includes(word2))
+    );
+
+    return sharedWords.length >= minSharedWords;
+  }
+
+  // Select the best name from a list of similar names
+  selectBestName(names) {
+    if (names.length === 1) return names[0];
+
+    // Prefer names with more words (more complete)
+    const sortedByWordCount = names.sort((a, b) => {
+      const aWords = a.split(' ').filter(w => w.length > 0).length;
+      const bWords = b.split(' ').filter(w => w.length > 0).length;
+      return bWords - aWords;
+    });
+
+    // Among names with the same word count, prefer the first one (usually the most complete)
+    return sortedByWordCount[0];
   }
 
   // Analyze images with Gemma 3n for quality and document issues
@@ -557,6 +805,125 @@ IMPORTANT:
     return combined;
   }
 
+  combinePageAnalyses(pageAnalyses, fileName) {
+    console.log(`[COMBINE] Combining ${pageAnalyses.length} page analyses...`);
+    
+    if (pageAnalyses.length === 0) {
+      return {
+        patientIdentifiers: { names: [], hospitalNumbers: [] },
+        multiplePatients: { detected: false, evidence: '', pages: [] },
+        dateIssues: { detected: false, evidence: '', pages: [] },
+        pagesWithoutIdentifiers: [],
+        extractedDates: []
+      };
+    }
+
+    // Initialize combined analysis
+    const combinedAnalysis = {
+      patientIdentifiers: { names: [], hospitalNumbers: [] },
+      multiplePatients: { detected: false, evidence: '', pages: [] },
+      dateIssues: { detected: false, evidence: '', pages: [] },
+      pagesWithoutIdentifiers: [],
+      extractedDates: []
+    };
+
+    // Collect all patient identifiers from all pages
+    const allNames = [];
+    const allHospitalNumbers = [];
+    const allDates = [];
+    const pagesWithoutIdentifiers = [];
+
+    pageAnalyses.forEach((pageAnalysis, index) => {
+      const pageNumber = pageAnalysis.pageNumber || (index + 1);
+      
+      // Add patient names from this page
+      if (pageAnalysis.patientIdentifiers && pageAnalysis.patientIdentifiers.names) {
+        pageAnalysis.patientIdentifiers.names.forEach(name => {
+          allNames.push({ name, page: pageNumber });
+        });
+      }
+      
+      // Add hospital numbers from this page
+      if (pageAnalysis.patientIdentifiers && pageAnalysis.patientIdentifiers.hospitalNumbers) {
+        pageAnalysis.patientIdentifiers.hospitalNumbers.forEach(number => {
+          allHospitalNumbers.push({ number, page: pageNumber });
+        });
+      }
+      
+      // Add dates from this page
+      if (pageAnalysis.extractedDates) {
+        pageAnalysis.extractedDates.forEach(date => {
+          allDates.push({ ...date, page: pageNumber });
+        });
+      }
+      
+      // Check if this page has no identifiers
+      const hasNames = pageAnalysis.patientIdentifiers && pageAnalysis.patientIdentifiers.names && pageAnalysis.patientIdentifiers.names.length > 0;
+      const hasNumbers = pageAnalysis.patientIdentifiers && pageAnalysis.patientIdentifiers.hospitalNumbers && pageAnalysis.patientIdentifiers.hospitalNumbers.length > 0;
+      
+      if (!hasNames && !hasNumbers) {
+        pagesWithoutIdentifiers.push(pageNumber);
+      }
+    });
+
+    // Set combined patient identifiers with name consolidation
+    const allNameStrings = allNames.map(item => item.name);
+    console.log(`[COMBINE] All names before consolidation: ${allNameStrings.join(', ')}`);
+    combinedAnalysis.patientIdentifiers.names = this.consolidateNameVariations(allNameStrings);
+    console.log(`[COMBINE] Names after consolidation: ${combinedAnalysis.patientIdentifiers.names.join(', ')}`);
+    combinedAnalysis.patientIdentifiers.hospitalNumbers = allHospitalNumbers.map(item => item.number);
+    combinedAnalysis.extractedDates = allDates;
+    combinedAnalysis.pagesWithoutIdentifiers = pagesWithoutIdentifiers;
+
+    // Check for multiple patients (using consolidated names)
+    const uniqueNumbers = [...new Set(allHospitalNumbers.map(item => item.number))];
+    
+    if (combinedAnalysis.patientIdentifiers.names.length > 1) {
+      combinedAnalysis.multiplePatients = {
+        detected: true,
+        evidence: `Multiple different patient names found: ${combinedAnalysis.patientIdentifiers.names.join(', ')}`,
+        pages: [...new Set(allNames.map(item => item.page))]
+      };
+    } else if (uniqueNumbers.length > 1 && combinedAnalysis.patientIdentifiers.names.length === 1) {
+      // Same name but different hospital numbers
+      combinedAnalysis.multiplePatients = {
+        detected: true,
+        evidence: `Same patient name (${combinedAnalysis.patientIdentifiers.names[0]}) found with multiple different hospital numbers: ${uniqueNumbers.join(', ')}. This may indicate multiple patients or data inconsistency.`,
+        pages: [...new Set(allHospitalNumbers.map(item => item.page))]
+      };
+    }
+
+    // Check for date issues (chronological order)
+    if (allDates.length > 1) {
+      const sortedDates = allDates
+        .filter(date => date.parsedDate)
+        .sort((a, b) => new Date(a.parsedDate) - new Date(b.parsedDate));
+      
+      if (sortedDates.length > 1) {
+        // Check if pages are in chronological order
+        const pageOrder = sortedDates.map(date => date.page);
+        const expectedOrder = [...new Set(pageOrder)].sort((a, b) => a - b);
+        
+        if (JSON.stringify(pageOrder) !== JSON.stringify(expectedOrder)) {
+          combinedAnalysis.dateIssues = {
+            detected: true,
+            evidence: `Pages appear to be out of chronological order. Expected order: ${expectedOrder.join(', ')}, but found: ${pageOrder.join(', ')}`,
+            pages: pageOrder
+          };
+        }
+      }
+    }
+
+    console.log(`[COMBINE] Combined analysis result:`);
+    console.log(`[COMBINE] - Total names: ${combinedAnalysis.patientIdentifiers.names.length}`);
+    console.log(`[COMBINE] - Total hospital numbers: ${combinedAnalysis.patientIdentifiers.hospitalNumbers.length}`);
+    console.log(`[COMBINE] - Multiple patients detected: ${combinedAnalysis.multiplePatients.detected}`);
+    console.log(`[COMBINE] - Date issues detected: ${combinedAnalysis.dateIssues.detected}`);
+    console.log(`[COMBINE] - Pages without identifiers: ${combinedAnalysis.pagesWithoutIdentifiers.length}`);
+
+    return combinedAnalysis;
+  }
+
   // Generate recommendations with Gemma 3n
   async generateRecommendations(textAnalysis, imageAnalysis, fileName) {
     console.log(`[RECOMMENDATIONS] Starting recommendations generation for: ${fileName}`);
@@ -584,11 +951,32 @@ Safety Criteria:
 - UNSAFE: Missing patient identifiers on more than 50% of pages, multiple patients mixed, critical date mismatches
 - SAFE: Minor issues that don't affect identification or critical data
 
-IMPORTANT: 
-- If identifierCoverage.coveragePercentage is less than 50%, mark as UNSAFE and add "Low identifier coverage (X% below 50% threshold)" to priorityIssues
-- If multiplePatients.detected is true, mark as UNSAFE and add "Multiple patients detected in single document" to priorityIssues
+Multiple Patient Detection Rules:
+- Only flag as multiple patients if DIFFERENT patient names appear in "NAME" fields
+- Same patient name appearing multiple times = single patient (safe) - even across different pages
+- Same patient name on page 1 and page 2 = ONE patient (safe)
+- Different names in different sections (doctor, next of kin, staff) = single patient (safe)
+- Doctor names, staff names, next of kin names are NOT patient names
+- The FIRST name that appears on the page is usually the patient's name
+- The FIRST 6-digit number that appears on the page is usually the hospital number
+- IGNORE these fields completely: "Next of Kin", "Emergency Contact", "M.D.", "Doctor", "Nursing Staff", "Signature"
+- Example: "NAME: Hershelle Stephen" + "Next of Kin: Edmira Stephen" = ONE patient (Hershelle Stephen)
+- Example: "NAME: Hershelle Stephen" on page 1 + "NAME: Hershelle Stephen" on page 2 = ONE patient (Hershelle Stephen)
+
+IMPORTANT LOGIC RULES: 
+- If identifierCoverage.coveragePercentage is GREATER THAN OR EQUAL TO 50%, the document is SAFE for identifier coverage
+- If identifierCoverage.coveragePercentage is LESS THAN 50%, mark as UNSAFE and add "Low identifier coverage (X% below 50% threshold)" to priorityIssues
+- If identifierCoverage.coveragePercentage >= 50%, DO NOT add "missing patient identifiers" issues to priorityIssues
+- If multiplePatients.detected is FALSE, there are NO multiple patient issues
+- If multiplePatients.detected is TRUE, mark as UNSAFE and add "Multiple patients detected in single document" to priorityIssues
 - If there are critical date mismatches, mark as UNSAFE and add "Critical date mismatches detected" to priorityIssues
+- If identifierCoverage.coveragePercentage >= 50% AND multiplePatients.detected is FALSE, the document should be marked as SAFE
 - Populate priorityIssues array with specific descriptions of the most critical problems found
+- priorityIssues should be an array of strings (e.g., ["Low identifier coverage", "Multiple patients detected"])
+- DO NOT generate unnecessary recommendations when the document is SAFE
+- If the document is SAFE, do NOT add "Implement a rescan" or similar scanning recommendations to immediateActions
+- Only add rescanning recommendations when there are actual image quality issues (blurry, dark, unreadable pages)
+- Chronological order issues will be automatically detected and added to recommendations
 - Respond with ONLY valid JSON. No additional text, explanations, or markdown formatting.
 
 {
@@ -634,7 +1022,71 @@ IMPORTANT:
           jsonText = jsonText.substring(jsonStart, jsonEnd + 1);
         }
         
-        return JSON.parse(jsonText);
+        const parsedRecommendations = JSON.parse(jsonText);
+        
+        // Fix common AI typos in JSON keys
+        if (parsedRecommendations.recommendaions) {
+          parsedRecommendations.recommendations = parsedRecommendations.recommendaions;
+          delete parsedRecommendations.recommendaions;
+          console.log('[RECOMMENDATIONS] Fixed typo: recommendaions -> recommendations');
+        }
+        
+        if (parsedRecommendations.safetyAssesment) {
+          parsedRecommendations.safetyAssessment = parsedRecommendations.safetyAssesment;
+          delete parsedRecommendations.safetyAssesment;
+          console.log('[RECOMMENDATIONS] Fixed typo: safetyAssesment -> safetyAssessment');
+        }
+        
+        if (parsedRecommendations.priorityIsssues) {
+          parsedRecommendations.priorityIssues = parsedRecommendations.priorityIsssues;
+          delete parsedRecommendations.priorityIsssues;
+          console.log('[RECOMMENDATIONS] Fixed typo: priorityIsssues -> priorityIssues');
+        }
+        
+        // Ensure required fields exist
+        if (!parsedRecommendations.recommendations) {
+          parsedRecommendations.recommendations = { manualReview: [], rescanning: [], verification: [], corrections: [] };
+        }
+        if (!parsedRecommendations.safetyAssessment) {
+          parsedRecommendations.safetyAssessment = { safeForUse: false, reason: 'Analysis failed', riskLevel: 'high', immediateActions: [] };
+        }
+        if (!parsedRecommendations.priorityIssues) {
+          parsedRecommendations.priorityIssues = [];
+        }
+        if (!parsedRecommendations.complianceStatus) {
+          parsedRecommendations.complianceStatus = 'needs-review';
+        }
+        
+        // Validate chronological order
+        const chronologicalValidation = this.validateChronologicalOrder(textAnalysis);
+        
+        // Add chronological issues to recommendations if found
+        if (!chronologicalValidation.isChronological) {
+          if (!parsedRecommendations.priorityIssues) {
+            parsedRecommendations.priorityIssues = [];
+          }
+          
+          // Handle multiple patients case differently
+          if (chronologicalValidation.multiplePatientsDetected) {
+            parsedRecommendations.priorityIssues.push('Multiple patients detected - chronological order cannot be validated');
+            if (!parsedRecommendations.safetyAssessment.immediateActions) {
+              parsedRecommendations.safetyAssessment.immediateActions = [];
+            }
+            parsedRecommendations.safetyAssessment.immediateActions.push('Separate patients into individual documents for proper chronological validation');
+          } else {
+            // Regular chronological order issues
+            parsedRecommendations.priorityIssues.push(...chronologicalValidation.issues);
+            if (!parsedRecommendations.safetyAssessment.immediateActions) {
+              parsedRecommendations.safetyAssessment.immediateActions = [];
+            }
+            parsedRecommendations.safetyAssessment.immediateActions.push('Review page order - pages appear out of chronological sequence');
+          }
+        }
+        
+        // Validate and correct AI errors
+        const validatedRecommendations = this.validateRecommendations(parsedRecommendations, textAnalysis);
+        
+        return validatedRecommendations;
       } catch (parseError) {
         console.error('Recommendations JSON parse error:', parseError);
         console.error('Response text:', responseText);
@@ -660,6 +1112,218 @@ IMPORTANT:
     }
   }
 
+  // Validate and correct AI recommendations
+  validateRecommendations(recommendations, textAnalysis) {
+    console.log('[VALIDATION] Validating AI recommendations...');
+    
+    const coveragePercentage = textAnalysis.identifierCoverage?.coveragePercentage || 0;
+    const multiplePatientsDetected = textAnalysis.multiplePatients?.detected || false;
+    
+    console.log('[VALIDATION] Coverage:', coveragePercentage + '%');
+    console.log('[VALIDATION] Multiple Patients:', multiplePatientsDetected);
+    
+    // Check for impossible logic errors
+    let corrected = false;
+    const correctedPriorityIssues = [];
+    
+    // Helper function to extract issue text (handles both string and object formats)
+    const getIssueText = (issue) => {
+      if (typeof issue === 'string') {
+        return issue;
+      } else if (issue && typeof issue === 'object' && issue.description) {
+        return issue.description;
+      }
+      return '';
+    };
+    
+    // Remove impossible coverage issues
+    if (coveragePercentage >= 50) {
+      // Remove any "low identifier coverage" issues and "missing identifiers" when coverage is good
+      const filteredIssues = (recommendations.priorityIssues || []).filter(issue => {
+        const issueText = getIssueText(issue).toLowerCase();
+        return !issueText.includes('low identifier coverage') &&
+               !issueText.includes('below 50% threshold') &&
+               !issueText.includes('missing patient identifiers on some pages') &&
+               !issueText.includes('missing patient identifiers');
+      });
+      
+      if (filteredIssues.length !== (recommendations.priorityIssues || []).length) {
+        corrected = true;
+        console.log('[VALIDATION] Removed impossible low coverage and missing identifier issues');
+      }
+      correctedPriorityIssues.push(...filteredIssues);
+    } else {
+      correctedPriorityIssues.push(...(recommendations.priorityIssues || []));
+    }
+    
+    // Check for multiple patient logic
+    if (!multiplePatientsDetected) {
+      // Remove any multiple patient issues
+      const filteredIssues = correctedPriorityIssues.filter(issue => {
+        const issueText = getIssueText(issue).toLowerCase();
+        return !issueText.includes('multiple patients') &&
+               !issueText.includes('multiple patient');
+      });
+      
+      if (filteredIssues.length !== correctedPriorityIssues.length) {
+        corrected = true;
+        console.log('[VALIDATION] Removed impossible multiple patient issues');
+      }
+      correctedPriorityIssues.length = 0;
+      correctedPriorityIssues.push(...filteredIssues);
+    }
+    
+    // Determine correct safety assessment
+    const shouldBeSafe = coveragePercentage >= 50 && !multiplePatientsDetected;
+    const currentSafe = recommendations.safetyAssessment?.safeForUse || false;
+    
+    if (shouldBeSafe !== currentSafe) {
+      corrected = true;
+      console.log('[VALIDATION] Correcting safety assessment from', currentSafe, 'to', shouldBeSafe);
+    }
+    
+    // Filter out unnecessary rescanning recommendations when document is safe
+    let correctedImmediateActions = recommendations.safetyAssessment?.immediateActions || [];
+    if (shouldBeSafe) {
+      correctedImmediateActions = correctedImmediateActions.filter(action => 
+        !action.toLowerCase().includes('rescan') &&
+        !action.toLowerCase().includes('scan') &&
+        !action.toLowerCase().includes('implement a rescan')
+      );
+      if (correctedImmediateActions.length !== (recommendations.safetyAssessment?.immediateActions || []).length) {
+        corrected = true;
+        console.log('[VALIDATION] Removed unnecessary rescanning recommendations');
+      }
+    }
+    
+    if (corrected) {
+      console.log('[VALIDATION] AI recommendations corrected due to logic errors');
+      return {
+        ...recommendations,
+        priorityIssues: correctedPriorityIssues,
+        safetyAssessment: {
+          ...recommendations.safetyAssessment,
+          safeForUse: shouldBeSafe,
+          reason: shouldBeSafe ? 'Document meets safety criteria' : 'Document has safety issues',
+          riskLevel: shouldBeSafe ? 'low' : 'high',
+          immediateActions: correctedImmediateActions
+        },
+        complianceStatus: shouldBeSafe ? 'approved' : 'needs-review'
+      };
+    }
+    
+    // Even if no other corrections were made, ensure rescan recommendations are filtered when safe
+    if (shouldBeSafe && (recommendations.safetyAssessment?.immediateActions || []).some(action => 
+      action.toLowerCase().includes('rescan') || 
+      action.toLowerCase().includes('scan') || 
+      action.toLowerCase().includes('implement a rescan')
+    )) {
+      console.log('[VALIDATION] Document is safe but has rescan recommendations - filtering them out');
+      const filteredImmediateActions = (recommendations.safetyAssessment?.immediateActions || []).filter(action => 
+        !action.toLowerCase().includes('rescan') &&
+        !action.toLowerCase().includes('scan') &&
+        !action.toLowerCase().includes('implement a rescan')
+      );
+      
+      return {
+        ...recommendations,
+        safetyAssessment: {
+          ...recommendations.safetyAssessment,
+          immediateActions: filteredImmediateActions
+        }
+      };
+    }
+    
+    console.log('[VALIDATION] AI recommendations are valid');
+    return recommendations;
+  }
+
+  // Validate chronological order of page dates
+  validateChronologicalOrder(textAnalysis) {
+    console.log('[CHRONOLOGY] Validating chronological order of page dates...');
+    
+    // Check if multiple patients are detected
+    const hasMultiplePatients = textAnalysis.multiplePatients?.detected || false;
+    
+    if (hasMultiplePatients) {
+      console.log('[CHRONOLOGY] Multiple patients detected - chronological order check skipped');
+      return {
+        isChronological: false,
+        outOfOrderPages: [],
+        missingDates: [],
+        issues: ['Multiple patients detected - chronological order cannot be validated'],
+        multiplePatientsDetected: true
+      };
+    }
+    
+    const pageDates = textAnalysis.dateIssues?.pageDates || [];
+    console.log('[CHRONOLOGY] Page dates found:', JSON.stringify(pageDates, null, 2));
+    
+    if (pageDates.length < 2) {
+      console.log('[CHRONOLOGY] Not enough dates to validate chronological order');
+      return {
+        isChronological: true,
+        outOfOrderPages: [],
+        missingDates: pageDates.filter(d => !d.date).map(d => d.page),
+        issues: []
+      };
+    }
+    
+    const chronologicalIssues = [];
+    const outOfOrderPages = [];
+    
+    // Sort dates by page number to get expected order
+    const sortedByPage = [...pageDates].sort((a, b) => a.page - b.page);
+    console.log('[CHRONOLOGY] Dates sorted by page number:', JSON.stringify(sortedByPage, null, 2));
+    
+    // Check if dates are in chronological order (ascending: earlier dates first)
+    for (let i = 1; i < sortedByPage.length; i++) {
+      const current = sortedByPage[i];
+      const previous = sortedByPage[i - 1];
+      
+      if (current.date && previous.date) {
+        const currentDate = new Date(current.date);
+        const previousDate = new Date(previous.date);
+        
+        console.log(`[CHRONOLOGY] Comparing: Page ${previous.page} (${previous.date}) vs Page ${current.page} (${current.date})`);
+        console.log(`[CHRONOLOGY] Date objects: ${previousDate.toISOString()} vs ${currentDate.toISOString()}`);
+        
+        if (currentDate < previousDate) {
+          const issue = `Page ${current.page} (${current.date}) appears before Page ${previous.page} (${previous.date}) - OUT OF ORDER`;
+          console.log(`[CHRONOLOGY] ISSUE FOUND: ${issue}`);
+          chronologicalIssues.push(issue);
+          outOfOrderPages.push({
+            page: current.page,
+            date: current.date,
+            expectedAfter: previous.page,
+            expectedAfterDate: previous.date
+          });
+        } else {
+          console.log(`[CHRONOLOGY] ✓ Page ${current.page} is correctly after Page ${previous.page}`);
+        }
+      } else {
+        console.log(`[CHRONOLOGY] Skipping comparison - missing date on page ${current.page} or ${previous.page}`);
+      }
+    }
+    
+    // Note: Missing dates are not treated as issues - they are assumed to be correctly scanned
+    const missingDates = pageDates.filter(d => !d.date).map(d => d.page);
+    
+    console.log('[CHRONOLOGY] Validation complete:', {
+      isChronological: chronologicalIssues.length === 0,
+      outOfOrderPages: outOfOrderPages.length,
+      missingDates: missingDates.length,
+      note: 'Missing dates are not treated as errors - assumed correctly scanned'
+    });
+    
+    return {
+      isChronological: chronologicalIssues.length === 0,
+      outOfOrderPages,
+      missingDates,
+      issues: chronologicalIssues
+    };
+  }
+
   // Generate comprehensive report
   generateReport(fileName, textAnalysis, imageAnalysis, recommendations, totalPages) {
     const scanDate = new Date().toISOString().split('T')[0];
@@ -670,6 +1334,15 @@ IMPORTANT:
     // Determine if file is safe
     const isSafe = recommendations.safetyAssessment?.safeForUse || false;
     
+    // Add console.log to debug detailedFindings
+    const detailedFindings = {
+      imageQualityIssues: this.formatImageQualityIssues(imageAnalysis),
+      pageSequence: this.formatPageSequenceIssues(imageAnalysis),
+      dataExtraction: this.formatDataExtractionIssues(textAnalysis)
+    };
+    
+    console.log('[REPORT] Detailed findings structure:', JSON.stringify(detailedFindings, null, 2));
+    
     return {
       fileInformation: {
         fileName: fileName,
@@ -677,11 +1350,9 @@ IMPORTANT:
         totalPages: totalPages
       },
       summaryTable: summaryTable,
-      detailedFindings: {
-        imageQualityIssues: this.formatImageQualityIssues(imageAnalysis),
-        pageSequence: this.formatPageSequenceIssues(imageAnalysis),
-        dataExtraction: this.formatDataExtractionIssues(textAnalysis)
-      },
+      detailedFindings: detailedFindings,
+      // Include patientIdentifiers for privacy feature
+      patientIdentifiers: textAnalysis.patientIdentifiers || { names: [], hospitalNumbers: [] },
       recommendations: recommendations.recommendations || {},
       safetyAssessment: {
         safeForUse: isSafe,
@@ -883,42 +1554,174 @@ IMPORTANT:
   }
 
      formatImageQualityIssues(imageAnalysis) {
-     return {
-       hasBlurryPages: imageAnalysis.imageQuality?.hasBlurryPages || false,
-       blurryPages: imageAnalysis.imageQuality?.blurryPages || [],
-       hasDarkPages: imageAnalysis.imageQuality?.hasDarkPages || false,
-       darkPages: imageAnalysis.imageQuality?.darkPages || [],
-       hasLightPages: imageAnalysis.imageQuality?.hasLightPages || false,
-       lightPages: imageAnalysis.imageQuality?.lightPages || [],
-       hasUnreadablePages: imageAnalysis.imageQuality?.hasUnreadablePages || false,
-       unreadablePages: imageAnalysis.imageQuality?.unreadablePages || []
-     };
-   }
+       const findings = [];
+       
+       // Add positive findings
+       if (!imageAnalysis.imageQuality?.hasBlurryPages) {
+         findings.push('Blurry images: No');
+       } else {
+         findings.push(`Blurry images: Pages ${imageAnalysis.imageQuality.blurryPages.join(', ')}`);
+       }
+       
+       if (!imageAnalysis.imageQuality?.hasDarkPages) {
+         findings.push('Dark images: No');
+       } else {
+         findings.push(`Dark images: Pages ${imageAnalysis.imageQuality.darkPages.join(', ')}`);
+       }
+       
+       if (!imageAnalysis.imageQuality?.hasLightPages) {
+         findings.push('Light/washed out images: No');
+       } else {
+         findings.push(`Light/washed out images: Pages ${imageAnalysis.imageQuality.lightPages.join(', ')}`);
+       }
+       
+       if (!imageAnalysis.imageQuality?.hasUnreadablePages) {
+         findings.push('Unreadable images: No');
+       } else {
+         findings.push(`Unreadable images: Pages ${imageAnalysis.imageQuality.unreadablePages.join(', ')}`);
+       }
+       
+       return {
+         hasBlurryPages: imageAnalysis.imageQuality?.hasBlurryPages || false,
+         blurryPages: imageAnalysis.imageQuality?.blurryPages || [],
+         hasDarkPages: imageAnalysis.imageQuality?.hasDarkPages || false,
+         darkPages: imageAnalysis.imageQuality?.darkPages || [],
+         hasLightPages: imageAnalysis.imageQuality?.hasLightPages || false,
+         lightPages: imageAnalysis.imageQuality?.lightPages || [],
+         hasUnreadablePages: imageAnalysis.imageQuality?.hasUnreadablePages || false,
+         unreadablePages: imageAnalysis.imageQuality?.unreadablePages || [],
+         positiveFindings: findings
+       };
+     }
 
      formatPageSequenceIssues(imageAnalysis) {
-     return {
-       hasCutoffPages: imageAnalysis.pageCompleteness?.hasCutoffPages || false,
-       cutoffPages: imageAnalysis.pageCompleteness?.cutoffPages || [],
-       hasIncompletePages: imageAnalysis.pageCompleteness?.hasIncompletePages || false,
-       incompletePages: imageAnalysis.pageCompleteness?.incompletePages || [],
-       hasDuplicatePages: imageAnalysis.duplicates?.hasDuplicatePages || false,
-       duplicatePages: imageAnalysis.duplicates?.duplicatePages || [],
-       orientationIssues: {
-         hasUpsideDown: imageAnalysis.orientation?.hasUpsideDown || false,
-         upsideDown: imageAnalysis.orientation?.upsideDown || [],
-         hasSideways: imageAnalysis.orientation?.hasSideways || false,
-         sideways: imageAnalysis.orientation?.sideways || [],
-         hasMisaligned: imageAnalysis.orientation?.hasMisaligned || false,
-         misaligned: imageAnalysis.orientation?.misaligned || []
+       const findings = [];
+       
+       // Add positive findings for page completeness
+       if (!imageAnalysis.pageCompleteness?.hasCutoffPages) {
+         findings.push('Cut-off pages: No');
+       } else {
+         findings.push(`Cut-off pages: Pages ${imageAnalysis.pageCompleteness.cutoffPages.join(', ')}`);
        }
-     };
-   }
+       
+       if (!imageAnalysis.pageCompleteness?.hasIncompletePages) {
+         findings.push('Incomplete pages: No');
+       } else {
+         findings.push(`Incomplete pages: Pages ${imageAnalysis.pageCompleteness.incompletePages.join(', ')}`);
+       }
+       
+       if (!imageAnalysis.duplicates?.hasDuplicatePages) {
+         findings.push('Duplicate pages: No');
+       } else {
+         findings.push(`Duplicate pages: ${imageAnalysis.duplicates.duplicatePages.map(d => d.pages.join(' and ')).join(', ')}`);
+       }
+       
+       // Add positive findings for orientation
+       if (!imageAnalysis.orientation?.hasUpsideDown) {
+         findings.push('Upside down pages: No');
+       } else {
+         findings.push(`Upside down pages: Pages ${imageAnalysis.orientation.upsideDown.join(', ')}`);
+       }
+       
+       if (!imageAnalysis.orientation?.hasSideways) {
+         findings.push('Sideways pages: No');
+       } else {
+         findings.push(`Sideways pages: Pages ${imageAnalysis.orientation.sideways.join(', ')}`);
+       }
+       
+       if (!imageAnalysis.orientation?.hasMisaligned) {
+         findings.push('Misaligned pages: No');
+       } else {
+         findings.push(`Misaligned pages: Pages ${imageAnalysis.orientation.misaligned.join(', ')}`);
+       }
+       
+       return {
+         hasCutoffPages: imageAnalysis.pageCompleteness?.hasCutoffPages || false,
+         cutoffPages: imageAnalysis.pageCompleteness?.cutoffPages || [],
+         hasIncompletePages: imageAnalysis.pageCompleteness?.hasIncompletePages || false,
+         incompletePages: imageAnalysis.pageCompleteness?.incompletePages || [],
+         hasDuplicatePages: imageAnalysis.duplicates?.hasDuplicatePages || false,
+         duplicatePages: imageAnalysis.duplicates?.duplicatePages || [],
+         orientationIssues: {
+           hasUpsideDown: imageAnalysis.orientation?.hasUpsideDown || false,
+           upsideDown: imageAnalysis.orientation?.upsideDown || [],
+           hasSideways: imageAnalysis.orientation?.hasSideways || false,
+           sideways: imageAnalysis.orientation?.sideways || [],
+           hasMisaligned: imageAnalysis.orientation?.hasMisaligned || false,
+           misaligned: imageAnalysis.orientation?.misaligned || []
+         },
+         positiveFindings: findings
+       };
+     }
 
   formatDataExtractionIssues(textAnalysis) {
+    const findings = [];
+    
+    // Add positive findings with privacy masking for UNIQUE patient names and IDs only
+    if (textAnalysis.patientIdentifiers?.names && textAnalysis.patientIdentifiers.names.length > 0) {
+      // Get unique names to avoid duplicates
+      const uniqueNames = [...new Set(textAnalysis.patientIdentifiers.names)];
+      uniqueNames.forEach((name, index) => {
+        findings.push({
+          type: 'patient_name',
+          label: `Patient name ${uniqueNames.length > 1 ? index + 1 : ''} found`,
+          value: name,
+          masked: '••••••••••'
+        });
+      });
+    }
+    
+    if (textAnalysis.patientIdentifiers?.hospitalNumbers && textAnalysis.patientIdentifiers.hospitalNumbers.length > 0) {
+      // Get unique hospital numbers to avoid duplicates
+      const uniqueHospitalNumbers = [...new Set(textAnalysis.patientIdentifiers.hospitalNumbers)];
+      uniqueHospitalNumbers.forEach((id, index) => {
+        findings.push({
+          type: 'hospital_id',
+          label: `Hospital ID ${uniqueHospitalNumbers.length > 1 ? index + 1 : ''} found`,
+          value: id,
+          masked: '••••••'
+        });
+      });
+    }
+    
+    if (textAnalysis.identifierCoverage?.coveragePercentage >= 50) {
+      findings.push(`Identifier coverage: ${textAnalysis.identifierCoverage.coveragePercentage.toFixed(1)}% (meets threshold)`);
+    } else {
+      findings.push(`Identifier coverage: ${textAnalysis.identifierCoverage?.coveragePercentage.toFixed(1) || 0}% (below threshold)`);
+    }
+    
+    if (!textAnalysis.multiplePatients?.detected) {
+      findings.push('Multiple patients: No');
+    } else {
+      findings.push('Multiple patients: Yes');
+    }
+    
+    if (!textAnalysis.dateIssues?.mismatches || textAnalysis.dateIssues.mismatches.length === 0) {
+      findings.push('Date mismatches: No');
+    } else {
+      findings.push(`Date mismatches: ${textAnalysis.dateIssues.mismatches.length} found`);
+    }
+    
+    // Add chronological order findings
+    const chronologicalValidation = this.validateChronologicalOrder(textAnalysis);
+    if (chronologicalValidation.isChronological) {
+      findings.push('Chronological order: Pages are in correct sequence');
+    } else {
+      findings.push(`Chronological order: ${chronologicalValidation.outOfOrderPages.length} pages out of sequence`);
+    }
+    
+    if (chronologicalValidation.missingDates.length === 0) {
+      findings.push('Missing dates: No');
+    } else {
+      findings.push(`Missing dates: Pages ${chronologicalValidation.missingDates.join(', ')} (assumed correctly scanned)`);
+    }
+    
     return {
       pagesWithoutIdentifiers: textAnalysis.pagesWithoutIdentifiers || [],
       multiplePatients: textAnalysis.multiplePatients || { detected: false, evidence: '', pages: [] },
-      dateMismatches: textAnalysis.dateIssues?.mismatches || []
+      dateMismatches: textAnalysis.dateIssues?.mismatches || [],
+      chronologicalIssues: chronologicalValidation,
+      positiveFindings: findings
     };
   }
 
@@ -1035,19 +1838,35 @@ IMPORTANT:
       console.log(`[MAIN] Number of pages with text: ${pageTexts.length}`);
       console.log(`Extracted ${allExtractedText.length} characters of text`);
       
-      // Step 3: Analyze text with Gemma 3n
-      console.log('Analyzing text content...');
-      console.log(`[MAIN] Text analysis input length: ${allExtractedText.length} characters`);
-      console.log(`[MAIN] Text analysis input preview: "${allExtractedText.substring(0, 500)}..."`);
+      // Step 3: Analyze text with Gemma 3n - PER PAGE ANALYSIS
+      console.log('Analyzing text content per page...');
+      console.log(`[MAIN] Number of pages to analyze: ${pageTexts.length}`);
       
-      if (!allExtractedText || allExtractedText.trim().length === 0) {
+      if (pageTexts.length === 0) {
         console.log(`[MAIN] WARNING: No text extracted from any pages!`);
         console.log(`[MAIN] This will result in no findings being generated.`);
       }
       
-      console.log(`[MAIN] About to call analyzeTextWithGemma...`);
-      const textAnalysis = await this.analyzeTextWithGemma(allExtractedText, fileName);
-      console.log(`[MAIN] analyzeTextWithGemma completed`);
+      // Analyze each page individually to ensure "one name per page" rule is applied correctly
+      const pageAnalyses = [];
+      for (let i = 0; i < pageTexts.length; i++) {
+        const pageData = pageTexts[i];
+        console.log(`[MAIN] Analyzing page ${pageData.page} (${pageData.text.length} characters)...`);
+        
+        try {
+          const pageAnalysis = await this.analyzeTextWithGemma(pageData.text, `${fileName} - Page ${pageData.page}`);
+          pageAnalysis.pageNumber = pageData.page;
+          pageAnalyses.push(pageAnalysis);
+          console.log(`[MAIN] Page ${pageData.page} analysis completed`);
+        } catch (error) {
+          console.error(`[MAIN] Failed to analyze page ${pageData.page}:`, error);
+          // Continue with next page
+        }
+      }
+      
+      // Combine all page analyses into a single text analysis
+      const textAnalysis = this.combinePageAnalyses(pageAnalyses, fileName);
+      console.log(`[MAIN] Combined text analysis completed`);
       console.log(`[MAIN] Text analysis result:`, JSON.stringify(textAnalysis, null, 2));
       
       // Step 4: Analyze images with Gemma 3n (TESTING: limit to first 5 pages)
