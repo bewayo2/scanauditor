@@ -81,7 +81,7 @@ class ComprehensiveAnalyzer {
       const base64Image = imageBuffer.toString('base64');
       console.log(`[OCR] Image converted to base64, length: ${base64Image.length} characters`);
       
-      const prompt = `Extract all text from this medical document image. Return ONLY the extracted text, no explanations or formatting. Focus on patient identifiers, dates, medical notes, and any handwritten or printed text.`;
+      const prompt = `Extract all text from this medical document image. Return ONLY the extracted text, no explanations or formatting. Focus on patient names (not doctor names), hospital numbers (5-6 digit numbers, no "MR" prefix), dates, medical notes, and any handwritten or printed text.`;
       console.log(`[OCR] Sending request to Ollama with prompt length: ${prompt.length} characters`);
       
       console.log(`[OCR] Making API call to: ${this.ollamaBaseUrl}/api/generate`);
@@ -134,7 +134,7 @@ class ComprehensiveAnalyzer {
       console.log(`[TEXT] No text provided for analysis`);
       return {
         error: 'No text provided for analysis',
-        patientIdentifiers: { names: [], hospitalNumbers: [], mrns: [] },
+        patientIdentifiers: { names: [], hospitalNumbers: [] },
         multiplePatients: { detected: false, evidence: '', pages: [] },
         dateIssues: { mismatches: [], missingDates: [] },
         pagesWithoutIdentifiers: [],
@@ -149,18 +149,22 @@ Document: ${fileName}
 Text Content: ${fullText}
 
 Instructions:
-1. Find all patient names, IDs, hospital numbers, MRNs
-2. Check if document contains information for multiple patients
-3. Look for impossible date sequences (e.g., discharge before admission)
-4. Identify pages or sections without patient identifiers
+1. Find patient names (full names, not doctor names) and hospital numbers (5-6 digit numbers, no "MR" prefix)
+2. Focus on identifiers near the top of the page
+3. Check if document contains information for multiple patients
+4. Look for impossible date sequences (e.g., discharge before admission)
+5. Identify pages or sections without patient identifiers (name OR hospital number)
 
-IMPORTANT: Respond with ONLY valid JSON. No additional text, explanations, or markdown formatting.
+IMPORTANT: 
+- Hospital numbers are 5-6 digit numbers only (no "MR" prefix)
+- Do NOT include doctor names, MRNs, or patient IDs
+- We accept either a patient name OR hospital number per page
+- Respond with ONLY valid JSON. No additional text, explanations, or markdown formatting.
 
 {
   "patientIdentifiers": {
     "names": [],
-    "hospitalNumbers": [],
-    "mrns": []
+    "hospitalNumbers": []
   },
   "multiplePatients": {
     "detected": false,
@@ -215,7 +219,7 @@ IMPORTANT: Respond with ONLY valid JSON. No additional text, explanations, or ma
         // Return a safe fallback response
         return {
           error: 'Text analysis failed - invalid JSON response',
-          patientIdentifiers: { names: [], hospitalNumbers: [], mrns: [] },
+          patientIdentifiers: { names: [], hospitalNumbers: [] },
           multiplePatients: { detected: false, evidence: '', pages: [] },
           dateIssues: { mismatches: [], missingDates: [] },
           pagesWithoutIdentifiers: [],
@@ -285,39 +289,49 @@ IMPORTANT: Respond with ONLY valid JSON. No additional text, explanations, or ma
 Document: ${fileName}
 Batch: ${Math.floor(i/batchSize) + 1}/${Math.ceil(imagePaths.length/batchSize)}
 Images in this batch: ${base64Images.length}
+Current batch starts at page: ${i + 1}
 
 Instructions:
 1. Check image quality (clarity, blur, darkness, brightness)
-2. Identify missing content or cut-off text
-3. Detect orientation issues (upside-down, sideways)
-4. Find duplicate pages
-5. Check document structure and sequence
+2. Identify cut-off or incomplete content within each page
+3. Detect orientation issues (upside-down, sideways, misaligned)
+4. Find duplicate pages within this batch
 
-IMPORTANT: Respond with ONLY valid JSON. No additional text, explanations, or markdown formatting.
+IMPORTANT: 
+- Answer YES/NO for each category
+- If YES, list the specific page numbers affected
+- Page numbers should be absolute (${i + 1}, ${i + 2}, ${i + 3}, etc.)
+- Focus only on visual issues that can be detected from the images
+- Respond with ONLY valid JSON. No additional text, explanations, or markdown formatting.
 
 {
   "imageQuality": {
+    "hasBlurryPages": false,
     "blurryPages": [],
+    "hasDarkPages": false,
     "darkPages": [],
+    "hasLightPages": false,
     "lightPages": [],
+    "hasUnreadablePages": false,
     "unreadablePages": []
   },
   "pageCompleteness": {
-    "missingPages": [],
+    "hasCutoffPages": false,
     "cutoffPages": [],
+    "hasIncompletePages": false,
     "incompletePages": []
   },
   "orientation": {
+    "hasUpsideDown": false,
     "upsideDown": [],
+    "hasSideways": false,
     "sideways": [],
+    "hasMisaligned": false,
     "misaligned": []
   },
   "duplicates": {
+    "hasDuplicatePages": false,
     "duplicatePages": []
-  },
-  "documentStructure": {
-    "missingSequences": [],
-    "outOfOrder": []
   },
   "overallQualityScore": 0,
   "criticalImageIssues": []
@@ -360,32 +374,58 @@ IMPORTANT: Respond with ONLY valid JSON. No additional text, explanations, or ma
         } catch (parseError) {
           console.error(`[ANALYSIS] Batch ${Math.floor(i/batchSize) + 1} JSON parse error:`, parseError);
           
-          // Add fallback result for this batch
-          allResults.push({
-            error: `Batch ${Math.floor(i/batchSize) + 1} failed - invalid JSON response`,
-            imageQuality: { blurryPages: [], darkPages: [], lightPages: [], unreadablePages: [] },
-            pageCompleteness: { missingPages: [], cutoffPages: [], incompletePages: [] },
-            orientation: { upsideDown: [], sideways: [], misaligned: [] },
-            duplicates: { duplicatePages: [] },
-            documentStructure: { missingSequences: [], outOfOrder: [] },
-            overallQualityScore: 0,
-            criticalImageIssues: [`Batch ${Math.floor(i/batchSize) + 1} failed`]
-          });
+                     // Add fallback result for this batch
+           allResults.push({
+             error: `Batch ${Math.floor(i/batchSize) + 1} failed - invalid JSON response`,
+             imageQuality: { 
+               hasBlurryPages: false, blurryPages: [], 
+               hasDarkPages: false, darkPages: [], 
+               hasLightPages: false, lightPages: [], 
+               hasUnreadablePages: false, unreadablePages: [] 
+             },
+             pageCompleteness: { 
+               hasCutoffPages: false, cutoffPages: [], 
+               hasIncompletePages: false, incompletePages: [] 
+             },
+             orientation: { 
+               hasUpsideDown: false, upsideDown: [], 
+               hasSideways: false, sideways: [], 
+               hasMisaligned: false, misaligned: [] 
+             },
+             duplicates: { 
+               hasDuplicatePages: false, duplicatePages: [] 
+             },
+             overallQualityScore: 0,
+             criticalImageIssues: [`Batch ${Math.floor(i/batchSize) + 1} failed`]
+           });
         }
       } catch (error) {
         console.error(`[ANALYSIS] Batch ${Math.floor(i/batchSize) + 1} failed:`, error);
         
-        // Add fallback result for this batch
-        allResults.push({
-          error: `Batch ${Math.floor(i/batchSize) + 1} failed`,
-          imageQuality: { blurryPages: [], darkPages: [], lightPages: [], unreadablePages: [] },
-          pageCompleteness: { missingPages: [], cutoffPages: [], incompletePages: [] },
-          orientation: { upsideDown: [], sideways: [], misaligned: [] },
-          duplicates: { duplicatePages: [] },
-          documentStructure: { missingSequences: [], outOfOrder: [] },
-          overallQualityScore: 0,
-          criticalImageIssues: [`Batch ${Math.floor(i/batchSize) + 1} failed`]
-        });
+                 // Add fallback result for this batch
+         allResults.push({
+           error: `Batch ${Math.floor(i/batchSize) + 1} failed`,
+           imageQuality: { 
+             hasBlurryPages: false, blurryPages: [], 
+             hasDarkPages: false, darkPages: [], 
+             hasLightPages: false, lightPages: [], 
+             hasUnreadablePages: false, unreadablePages: [] 
+           },
+           pageCompleteness: { 
+             hasCutoffPages: false, cutoffPages: [], 
+             hasIncompletePages: false, incompletePages: [] 
+           },
+           orientation: { 
+             hasUpsideDown: false, upsideDown: [], 
+             hasSideways: false, sideways: [], 
+             hasMisaligned: false, misaligned: [] 
+           },
+           duplicates: { 
+             hasDuplicatePages: false, duplicatePages: [] 
+           },
+           overallQualityScore: 0,
+           criticalImageIssues: [`Batch ${Math.floor(i/batchSize) + 1} failed`]
+         });
       }
     }
     
@@ -398,33 +438,38 @@ IMPORTANT: Respond with ONLY valid JSON. No additional text, explanations, or ma
   combineBatchResults(batchResults, totalPages) {
     console.log(`[COMBINE] Combining ${batchResults.length} batch results...`);
     
-    const combined = {
-      imageQuality: {
-        blurryPages: [],
-        darkPages: [],
-        lightPages: [],
-        unreadablePages: []
-      },
-      pageCompleteness: {
-        missingPages: [],
-        cutoffPages: [],
-        incompletePages: []
-      },
-      orientation: {
-        upsideDown: [],
-        sideways: [],
-        misaligned: []
-      },
-      duplicates: {
-        duplicatePages: []
-      },
-      documentStructure: {
-        missingSequences: [],
-        outOfOrder: []
-      },
-      overallQualityScore: 0,
-      criticalImageIssues: []
-    };
+         const combined = {
+       imageQuality: {
+         hasBlurryPages: false,
+         blurryPages: [],
+         hasDarkPages: false,
+         darkPages: [],
+         hasLightPages: false,
+         lightPages: [],
+         hasUnreadablePages: false,
+         unreadablePages: []
+       },
+       pageCompleteness: {
+         hasCutoffPages: false,
+         cutoffPages: [],
+         hasIncompletePages: false,
+         incompletePages: []
+       },
+       orientation: {
+         hasUpsideDown: false,
+         upsideDown: [],
+         hasSideways: false,
+         sideways: [],
+         hasMisaligned: false,
+         misaligned: []
+       },
+       duplicates: {
+         hasDuplicatePages: false,
+         duplicatePages: []
+       },
+       overallQualityScore: 0,
+       criticalImageIssues: []
+     };
     
     let totalScore = 0;
     let validBatches = 0;
@@ -438,34 +483,60 @@ IMPORTANT: Respond with ONLY valid JSON. No additional text, explanations, or ma
       
       validBatches++;
       
-      // Combine arrays
-      if (batch.imageQuality) {
-        combined.imageQuality.blurryPages.push(...(batch.imageQuality.blurryPages || []));
-        combined.imageQuality.darkPages.push(...(batch.imageQuality.darkPages || []));
-        combined.imageQuality.lightPages.push(...(batch.imageQuality.lightPages || []));
-        combined.imageQuality.unreadablePages.push(...(batch.imageQuality.unreadablePages || []));
-      }
-      
-      if (batch.pageCompleteness) {
-        combined.pageCompleteness.missingPages.push(...(batch.pageCompleteness.missingPages || []));
-        combined.pageCompleteness.cutoffPages.push(...(batch.pageCompleteness.cutoffPages || []));
-        combined.pageCompleteness.incompletePages.push(...(batch.pageCompleteness.incompletePages || []));
-      }
-      
-      if (batch.orientation) {
-        combined.orientation.upsideDown.push(...(batch.orientation.upsideDown || []));
-        combined.orientation.sideways.push(...(batch.orientation.sideways || []));
-        combined.orientation.misaligned.push(...(batch.orientation.misaligned || []));
-      }
-      
-      if (batch.duplicates) {
-        combined.duplicates.duplicatePages.push(...(batch.duplicates.duplicatePages || []));
-      }
-      
-      if (batch.documentStructure) {
-        combined.documentStructure.missingSequences.push(...(batch.documentStructure.missingSequences || []));
-        combined.documentStructure.outOfOrder.push(...(batch.documentStructure.outOfOrder || []));
-      }
+             // Combine arrays and update boolean flags
+       if (batch.imageQuality) {
+         if (batch.imageQuality.blurryPages && batch.imageQuality.blurryPages.length > 0) {
+           combined.imageQuality.hasBlurryPages = true;
+           combined.imageQuality.blurryPages.push(...batch.imageQuality.blurryPages);
+         }
+         if (batch.imageQuality.darkPages && batch.imageQuality.darkPages.length > 0) {
+           combined.imageQuality.hasDarkPages = true;
+           combined.imageQuality.darkPages.push(...batch.imageQuality.darkPages);
+         }
+         if (batch.imageQuality.lightPages && batch.imageQuality.lightPages.length > 0) {
+           combined.imageQuality.hasLightPages = true;
+           combined.imageQuality.lightPages.push(...batch.imageQuality.lightPages);
+         }
+         if (batch.imageQuality.unreadablePages && batch.imageQuality.unreadablePages.length > 0) {
+           combined.imageQuality.hasUnreadablePages = true;
+           combined.imageQuality.unreadablePages.push(...batch.imageQuality.unreadablePages);
+         }
+       }
+       
+               if (batch.pageCompleteness) {
+          if (batch.pageCompleteness.cutoffPages && batch.pageCompleteness.cutoffPages.length > 0) {
+            combined.pageCompleteness.hasCutoffPages = true;
+            combined.pageCompleteness.cutoffPages.push(...batch.pageCompleteness.cutoffPages);
+          }
+          if (batch.pageCompleteness.incompletePages && batch.pageCompleteness.incompletePages.length > 0) {
+            combined.pageCompleteness.hasIncompletePages = true;
+            combined.pageCompleteness.incompletePages.push(...batch.pageCompleteness.incompletePages);
+          }
+        }
+       
+       if (batch.orientation) {
+         if (batch.orientation.upsideDown && batch.orientation.upsideDown.length > 0) {
+           combined.orientation.hasUpsideDown = true;
+           combined.orientation.upsideDown.push(...batch.orientation.upsideDown);
+         }
+         if (batch.orientation.sideways && batch.orientation.sideways.length > 0) {
+           combined.orientation.hasSideways = true;
+           combined.orientation.sideways.push(...batch.orientation.sideways);
+         }
+         if (batch.orientation.misaligned && batch.orientation.misaligned.length > 0) {
+           combined.orientation.hasMisaligned = true;
+           combined.orientation.misaligned.push(...batch.orientation.misaligned);
+         }
+       }
+       
+       if (batch.duplicates) {
+         if (batch.duplicates.duplicatePages && batch.duplicates.duplicatePages.length > 0) {
+           combined.duplicates.hasDuplicatePages = true;
+           combined.duplicates.duplicatePages.push(...batch.duplicates.duplicatePages);
+         }
+       }
+       
+       
       
       if (batch.criticalImageIssues) {
         combined.criticalImageIssues.push(...(batch.criticalImageIssues || []));
@@ -507,12 +578,18 @@ Instructions:
 2. Provide rescanning recommendations
 3. Identify verification needs
 4. Assess safety (safe/unsafe for use)
+5. List priority issues in the priorityIssues array with specific descriptions
 
 Safety Criteria:
-- UNSAFE: Missing patient identifiers on multiple/all pages, multiple patients mixed, critical date mismatches
+- UNSAFE: Missing patient identifiers on more than 50% of pages, multiple patients mixed, critical date mismatches
 - SAFE: Minor issues that don't affect identification or critical data
 
-IMPORTANT: Respond with ONLY valid JSON. No additional text, explanations, or markdown formatting.
+IMPORTANT: 
+- If identifierCoverage.coveragePercentage is less than 50%, mark as UNSAFE and add "Low identifier coverage (X% below 50% threshold)" to priorityIssues
+- If multiplePatients.detected is true, mark as UNSAFE and add "Multiple patients detected in single document" to priorityIssues
+- If there are critical date mismatches, mark as UNSAFE and add "Critical date mismatches detected" to priorityIssues
+- Populate priorityIssues array with specific descriptions of the most critical problems found
+- Respond with ONLY valid JSON. No additional text, explanations, or markdown formatting.
 
 {
   "recommendations": {
@@ -620,53 +697,119 @@ IMPORTANT: Respond with ONLY valid JSON. No additional text, explanations, or ma
   createSummaryTable(textAnalysis, imageAnalysis, recommendations) {
     const issues = [];
     
-    // Image quality issues
-    const blurryCount = (imageAnalysis.imageQuality?.blurryPages || []).length;
-    if (blurryCount > 0) {
-      issues.push({
-        issueType: 'Blurry/Low-Quality Images',
-        count: blurryCount,
-        pagesAffected: imageAnalysis.imageQuality.blurryPages.join(', ')
-      });
-    }
-    
-    // Missing pages
-    const missingCount = (imageAnalysis.pageCompleteness?.missingPages || []).length;
-    if (missingCount > 0) {
-      issues.push({
-        issueType: 'Missing Pages',
-        count: missingCount,
-        pagesAffected: imageAnalysis.pageCompleteness.missingPages.join(', ')
-      });
-    }
-    
-    // Orientation issues
-    const orientationCount = (imageAnalysis.orientation?.upsideDown || []).length + 
-                           (imageAnalysis.orientation?.sideways || []).length;
-    if (orientationCount > 0) {
-      issues.push({
-        issueType: 'Improper Orientation',
-        count: orientationCount,
-        pagesAffected: [...(imageAnalysis.orientation?.upsideDown || []), 
-                       ...(imageAnalysis.orientation?.sideways || [])].join(', ')
-      });
-    }
-    
-    // Duplicate pages
-    const duplicateCount = (imageAnalysis.duplicates?.duplicatePages || []).length;
-    if (duplicateCount > 0) {
-      issues.push({
-        issueType: 'Duplicate Pages',
-        count: duplicateCount,
-        pagesAffected: imageAnalysis.duplicates.duplicatePages.map(d => d.pages.join(' and ')).join(', ')
-      });
-    }
+         // Image quality issues
+     if (imageAnalysis.imageQuality?.hasBlurryPages) {
+       const blurryPages = imageAnalysis.imageQuality.blurryPages || [];
+       issues.push({
+         issueType: 'Blurry/Low-Quality Images',
+         count: blurryPages.length,
+         pagesAffected: blurryPages.join(', '),
+         description: `YES - Pages ${blurryPages.join(', ')} are blurry or low quality`
+       });
+     }
+     
+     if (imageAnalysis.imageQuality?.hasDarkPages) {
+       const darkPages = imageAnalysis.imageQuality.darkPages || [];
+       issues.push({
+         issueType: 'Dark Pages',
+         count: darkPages.length,
+         pagesAffected: darkPages.join(', '),
+         description: `YES - Pages ${darkPages.join(', ')} are too dark to read`
+       });
+     }
+     
+     if (imageAnalysis.imageQuality?.hasLightPages) {
+       const lightPages = imageAnalysis.imageQuality.lightPages || [];
+       issues.push({
+         issueType: 'Light/Washed Out Pages',
+         count: lightPages.length,
+         pagesAffected: lightPages.join(', '),
+         description: `YES - Pages ${lightPages.join(', ')} are too light or washed out`
+       });
+     }
+     
+     if (imageAnalysis.imageQuality?.hasUnreadablePages) {
+       const unreadablePages = imageAnalysis.imageQuality.unreadablePages || [];
+       issues.push({
+         issueType: 'Unreadable Pages',
+         count: unreadablePages.length,
+         pagesAffected: unreadablePages.join(', '),
+         description: `YES - Pages ${unreadablePages.join(', ')} are unreadable`
+       });
+     }
+     
+     
+     
+     if (imageAnalysis.pageCompleteness?.hasCutoffPages) {
+       const cutoffPages = imageAnalysis.pageCompleteness.cutoffPages || [];
+       issues.push({
+         issueType: 'Cut-off Pages',
+         count: cutoffPages.length,
+         pagesAffected: cutoffPages.join(', '),
+         description: `YES - Pages ${cutoffPages.join(', ')} have cut-off content`
+       });
+     }
+     
+     if (imageAnalysis.pageCompleteness?.hasIncompletePages) {
+       const incompletePages = imageAnalysis.pageCompleteness.incompletePages || [];
+       issues.push({
+         issueType: 'Incomplete Pages',
+         count: incompletePages.length,
+         pagesAffected: incompletePages.join(', '),
+         description: `YES - Pages ${incompletePages.join(', ')} are incomplete`
+       });
+     }
+     
+     // Orientation issues
+     if (imageAnalysis.orientation?.hasUpsideDown) {
+       const upsideDownPages = imageAnalysis.orientation.upsideDown || [];
+       issues.push({
+         issueType: 'Upside Down Pages',
+         count: upsideDownPages.length,
+         pagesAffected: upsideDownPages.join(', '),
+         description: `YES - Pages ${upsideDownPages.join(', ')} are upside down`
+       });
+     }
+     
+     if (imageAnalysis.orientation?.hasSideways) {
+       const sidewaysPages = imageAnalysis.orientation.sideways || [];
+       issues.push({
+         issueType: 'Sideways Pages',
+         count: sidewaysPages.length,
+         pagesAffected: sidewaysPages.join(', '),
+         description: `YES - Pages ${sidewaysPages.join(', ')} are sideways`
+       });
+     }
+     
+     if (imageAnalysis.orientation?.hasMisaligned) {
+       const misalignedPages = imageAnalysis.orientation.misaligned || [];
+       issues.push({
+         issueType: 'Misaligned Pages',
+         count: misalignedPages.length,
+         pagesAffected: misalignedPages.join(', '),
+         description: `YES - Pages ${misalignedPages.join(', ')} are misaligned`
+       });
+     }
+     
+     // Duplicate pages
+     if (imageAnalysis.duplicates?.hasDuplicatePages) {
+       const duplicatePages = imageAnalysis.duplicates.duplicatePages || [];
+       issues.push({
+         issueType: 'Duplicate Pages',
+         count: duplicatePages.length,
+         pagesAffected: duplicatePages.map(d => d.pages.join(' and ')).join(', '),
+         description: `YES - Duplicate pages found: ${duplicatePages.map(d => d.pages.join(' and ')).join(', ')}`
+       });
+     }
     
     // Pages without identifiers
     const noIdCount = (textAnalysis.pagesWithoutIdentifiers || []).length;
     if (noIdCount > 0) {
+      const coverageInfo = textAnalysis.identifierCoverage ? 
+        ` (${textAnalysis.identifierCoverage.coveragePercentage.toFixed(1)}% coverage)` : '';
+      
       issues.push({
-        issueType: 'Pages without Identifiers',
+        issueType: `Pages without Identifiers${coverageInfo}`,
         count: noIdCount,
         pagesAffected: textAnalysis.pagesWithoutIdentifiers.join(', ')
       });
@@ -716,6 +859,16 @@ IMPORTANT: Respond with ONLY valid JSON. No additional text, explanations, or ma
       });
     }
     
+    // Add specific issue for low identifier coverage
+    if (textAnalysis.identifierCoverage && textAnalysis.identifierCoverage.isUnsafe) {
+      issues.push({
+        issueType: 'Low Identifier Coverage',
+        count: 1,
+        pagesAffected: 'All pages',
+        description: `Only ${textAnalysis.identifierCoverage.coveragePercentage.toFixed(1)}% of pages have patient identifiers (below 50% threshold)`
+      });
+    }
+    
     // If no specific issues found but document is marked as unsafe, add a general issue
     if (issues.length === 0 && recommendations.safetyAssessment?.safeForUse === false) {
       issues.push({
@@ -729,25 +882,37 @@ IMPORTANT: Respond with ONLY valid JSON. No additional text, explanations, or ma
     return issues;
   }
 
-  formatImageQualityIssues(imageAnalysis) {
-    return {
-      blurryPages: imageAnalysis.imageQuality?.blurryPages || [],
-      darkPages: imageAnalysis.imageQuality?.darkPages || [],
-      lightPages: imageAnalysis.imageQuality?.lightPages || [],
-      unreadablePages: imageAnalysis.imageQuality?.unreadablePages || []
-    };
-  }
+     formatImageQualityIssues(imageAnalysis) {
+     return {
+       hasBlurryPages: imageAnalysis.imageQuality?.hasBlurryPages || false,
+       blurryPages: imageAnalysis.imageQuality?.blurryPages || [],
+       hasDarkPages: imageAnalysis.imageQuality?.hasDarkPages || false,
+       darkPages: imageAnalysis.imageQuality?.darkPages || [],
+       hasLightPages: imageAnalysis.imageQuality?.hasLightPages || false,
+       lightPages: imageAnalysis.imageQuality?.lightPages || [],
+       hasUnreadablePages: imageAnalysis.imageQuality?.hasUnreadablePages || false,
+       unreadablePages: imageAnalysis.imageQuality?.unreadablePages || []
+     };
+   }
 
-  formatPageSequenceIssues(imageAnalysis) {
-    return {
-      missingPages: imageAnalysis.pageCompleteness?.missingPages || [],
-      duplicatePages: imageAnalysis.duplicates?.duplicatePages || [],
-      orientationIssues: {
-        upsideDown: imageAnalysis.orientation?.upsideDown || [],
-        sideways: imageAnalysis.orientation?.sideways || []
-      }
-    };
-  }
+     formatPageSequenceIssues(imageAnalysis) {
+     return {
+       hasCutoffPages: imageAnalysis.pageCompleteness?.hasCutoffPages || false,
+       cutoffPages: imageAnalysis.pageCompleteness?.cutoffPages || [],
+       hasIncompletePages: imageAnalysis.pageCompleteness?.hasIncompletePages || false,
+       incompletePages: imageAnalysis.pageCompleteness?.incompletePages || [],
+       hasDuplicatePages: imageAnalysis.duplicates?.hasDuplicatePages || false,
+       duplicatePages: imageAnalysis.duplicates?.duplicatePages || [],
+       orientationIssues: {
+         hasUpsideDown: imageAnalysis.orientation?.hasUpsideDown || false,
+         upsideDown: imageAnalysis.orientation?.upsideDown || [],
+         hasSideways: imageAnalysis.orientation?.hasSideways || false,
+         sideways: imageAnalysis.orientation?.sideways || [],
+         hasMisaligned: imageAnalysis.orientation?.hasMisaligned || false,
+         misaligned: imageAnalysis.orientation?.misaligned || []
+       }
+     };
+   }
 
   formatDataExtractionIssues(textAnalysis) {
     return {
@@ -890,12 +1055,35 @@ IMPORTANT: Respond with ONLY valid JSON. No additional text, explanations, or ma
       console.log(`[MAIN] Analyzing image quality for ${imagesToAnalyze.length} images (TESTING: limited to first 5 pages)`);
       const imageAnalysis = await this.analyzeImagesWithGemma(imagesToAnalyze, fileName);
       
-      // Step 5: Generate recommendations
-      console.log('Generating recommendations...');
-      console.log(`[MAIN] About to call generateRecommendations...`);
-      const recommendations = await this.generateRecommendations(textAnalysis, imageAnalysis, fileName);
-      console.log(`[MAIN] generateRecommendations completed`);
-      console.log(`[MAIN] Recommendations result:`, JSON.stringify(recommendations, null, 2));
+             // Step 5: Calculate identifier coverage and generate recommendations
+       console.log('Calculating identifier coverage...');
+       
+       // Calculate percentage of pages missing identifiers
+       const pagesWithoutIdentifiers = textAnalysis.pagesWithoutIdentifiers || [];
+       const totalPagesProcessed = maxPagesToProcess;
+       const pagesMissingIdentifiers = pagesWithoutIdentifiers.length;
+       const identifierCoveragePercentage = ((totalPagesProcessed - pagesMissingIdentifiers) / totalPagesProcessed) * 100;
+       const isUnsafeDueToMissingIdentifiers = identifierCoveragePercentage < 50;
+       
+       console.log(`[MAIN] Identifier coverage analysis:`);
+       console.log(`[MAIN] - Total pages processed: ${totalPagesProcessed}`);
+       console.log(`[MAIN] - Pages missing identifiers: ${pagesMissingIdentifiers}`);
+       console.log(`[MAIN] - Identifier coverage: ${identifierCoveragePercentage.toFixed(1)}%`);
+       console.log(`[MAIN] - Unsafe due to missing identifiers: ${isUnsafeDueToMissingIdentifiers}`);
+       
+       // Add identifier coverage info to text analysis
+       textAnalysis.identifierCoverage = {
+         totalPages: totalPagesProcessed,
+         pagesMissingIdentifiers: pagesMissingIdentifiers,
+         coveragePercentage: identifierCoveragePercentage,
+         isUnsafe: isUnsafeDueToMissingIdentifiers
+       };
+       
+       console.log('Generating recommendations...');
+       console.log(`[MAIN] About to call generateRecommendations...`);
+       const recommendations = await this.generateRecommendations(textAnalysis, imageAnalysis, fileName);
+       console.log(`[MAIN] generateRecommendations completed`);
+       console.log(`[MAIN] Recommendations result:`, JSON.stringify(recommendations, null, 2));
       
       // Step 6: Generate comprehensive report
       console.log('Generating final report...');

@@ -13,7 +13,7 @@ ScanAuditor now uses a comprehensive multi-stage analysis approach:
 - Processes entire documents, not just individual pages
 
 ### 2. **Gemma 3n 4b for Text Analysis**
-- Analyzes extracted text for patient identifiers
+- Analyzes extracted text for patient names and hospital numbers (5-6 digit numbers)
 - Detects multiple patients in single files
 - Identifies date mismatches and inconsistencies
 - Validates data integrity across all pages
@@ -34,7 +34,7 @@ ScanAuditor now uses a comprehensive multi-stage analysis approach:
 
 - **Multi-Page Analysis**: Processes entire documents, not just individual pages
 - **Handwriting Recognition**: Advanced OCR optimized for medical handwriting
-- **Data Integrity Checks**: Validates patient identifiers, dates, and consistency
+- **Data Integrity Checks**: Validates patient names and hospital numbers, dates, and consistency
 - **Quality Assessment**: Evaluates image quality and document completeness
 - **Safety Assessment**: Determines if documents are safe for clinical use
 - **Comprehensive Reporting**: Detailed reports with specific recommendations
@@ -119,14 +119,14 @@ Each analysis generates a comprehensive report including:
 ## Analysis Criteria
 
 ### Files Considered UNSAFE:
-- Missing patient identifiers on multiple/all pages
+- Missing patient names or hospital numbers on more than 50% of pages
 - Pages from multiple patients mixed together
 - Critical date mismatches (e.g., discharge before admission)
 - Missing critical information affecting patient care
 
 ### Files Considered SAFE:
 - Minor quality issues that don't affect identification
-- Single missing identifier with clear context
+- Missing patient names or hospital numbers on less than 50% of pages
 - Duplicate pages (when correct page is present)
 - Minor orientation issues (readable content)
 

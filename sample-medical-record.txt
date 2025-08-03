@@ -2,7 +2,7 @@ MEDICAL RECORD
 
 Patient Name: John Smith
 Date of Birth: 15/03/1985
-Medical Record Number: MR-2024-001
+Hospital Number: 123456
 
 Date of Visit: 15/12/2024
 Provider: Dr. Sarah Johnson

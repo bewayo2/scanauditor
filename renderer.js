@@ -302,6 +302,7 @@ const displayResultsDetails = () => {
                                     <th>Issue Type</th>
                                     <th>Count</th>
                                     <th>Pages Affected</th>
+                                    <th>Description</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -310,6 +311,7 @@ const displayResultsDetails = () => {
                                         <td>${issue.issueType}</td>
                                         <td>${issue.count}</td>
                                         <td>${issue.pagesAffected}</td>
+                                        <td>${issue.description || ''}</td>
                                     </tr>
                                 `).join('')}
                             </tbody>

@@ -6,18 +6,21 @@ Provider: Dr. Michael Chen
 
 PATIENT 1:
 Patient Name: Mary Johnson
+Hospital Number: 234567
 Date of Birth: 22/07/1978
 Chief Complaint: Chest pain
 Assessment: Stable, discharged with follow-up
 
 PATIENT 2:
 Patient Name: Robert Davis
+Hospital Number: 345678
 Date of Birth: 10/11/1992
 Chief Complaint: Ankle injury
 Assessment: Sprain, treated and discharged
 
 PATIENT 3:
 Patient Name: Lisa Thompson
+Hospital Number: 456789
 Date of Birth: 05/09/1988
 Chief Complaint: Fever and cough
 Assessment: Upper respiratory infection, prescribed antibiotics
