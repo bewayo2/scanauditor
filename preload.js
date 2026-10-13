@@ -17,5 +17,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     });
     
     return response.json();
-  }
+  },
+  exportToExcel: (analysisResults) => ipcRenderer.invoke('export-to-excel', analysisResults)
 }); 

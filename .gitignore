@@ -1,11 +1,5 @@
-# Dependencies
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
 # Python virtual environment
-pdf_converter_env/
+paddleocr_env/
 __pycache__/
 *.pyc
 *.pyo
@@ -15,65 +9,48 @@ env/
 venv/
 ENV/
 
-# Large binary files and dependencies
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Electron
+dist/
+dist-manual/
+build/
+
+# Bundled third-party binaries
 poppler-windows/
+*.asar
+
+# Temporary files
 temp_images/
 uploads/
-
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
+*.tmp
+*.temp
 
 # IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
+
+# OS files
+.DS_Store
+Thumbs.db
 
 # Logs
-logs/
 *.log
+logs/
 
-# Runtime data
-pids/
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage directory used by tools like istanbul
-coverage/
-
-# nyc test coverage
-.nyc_output/
-
-# Dependency directories
-jspm_packages/
-
-# Optional npm cache directory
-.npm
-
-# Optional REPL history
-.node_repl_history
-
-# Output of 'npm pack'
-*.tgz
-
-# Yarn Integrity file
-.yarn-integrity
-
-# dotenv environment variables file
+# Environment variables
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# Electron build output
-dist/
-build/
-
-# Temporary files
-*.tmp
-*.temp 
+# Test files
+test_*.png
+test_*.pdf 

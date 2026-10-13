@@ -6,6 +6,7 @@ const multer = require('multer');
 const axios = require('axios');
 const fs = require('fs-extra');
 const pdfParse = require('pdf-parse');
+const XLSX = require('xlsx');
 const ComprehensiveAnalyzer = require('./comprehensive_analyzer');
 
 
@@ -188,11 +189,11 @@ const setupBackend = () => {
       return await analyzer.analyzeFile(file);
     } catch (error) {
       console.error(`Error analyzing file ${file.originalname}:`, error);
-      return {
-        filename: file.originalname,
-        filepath: file.path,
-        analysis: {
-          error: error.message,
+             return {
+         filename: file.originalname,
+         filepath: file.path,
+         analysis: {
+           error: error.message,
           fileInformation: { fileName: file.originalname, scanDate: new Date().toISOString().split('T')[0], totalPages: 0 },
           summaryTable: [],
           detailedFindings: {},
@@ -200,9 +201,9 @@ const setupBackend = () => {
           safetyAssessment: { safeForUse: false, reason: 'Analysis failed', riskLevel: 'high', immediateActions: ['Manual review required'] },
           complianceStatus: 'needs-review',
           priorityIssues: ['Analysis failed']
-        },
-        timestamp: new Date().toISOString()
-      };
+         },
+         timestamp: new Date().toISOString()
+       };
     }
   };
 
@@ -298,6 +299,127 @@ ipcMain.handle('get-backend-status', async () => {
     return response.data;
   } catch (error) {
     return { status: 'error', ollama: 'disconnected', error: error.message };
+  }
+});
+
+// Excel export function
+const exportToExcel = (analysisResults) => {
+  try {
+    // Prepare data for Excel
+    const excelData = [];
+    
+    analysisResults.forEach((result) => {
+      const analysis = result.analysis;
+      
+      // Base row data
+      const row = {
+        'File Name': analysis.fileInformation?.fileName || result.filename || 'Unknown',
+        'Scan Date': analysis.fileInformation?.scanDate || 'Unknown',
+        'Total Pages': analysis.fileInformation?.totalPages || 0,
+        'Safe for Use': analysis.safetyAssessment?.safeForUse ? 'Yes' : 'No',
+        'Risk Level': analysis.safetyAssessment?.riskLevel || 'Unknown',
+        'Compliance Status': analysis.complianceStatus || 'Unknown',
+        'Reason': analysis.safetyAssessment?.reason || 'No reason provided',
+        'Total Issues': analysis.summaryTable ? analysis.summaryTable.length : 0
+      };
+      
+      // Add patient identifiers
+      if (analysis.patientIdentifiers) {
+        row['Patient Names'] = analysis.patientIdentifiers.names ? analysis.patientIdentifiers.names.join(', ') : '';
+        row['Hospital Numbers'] = analysis.patientIdentifiers.hospitalNumbers ? analysis.patientIdentifiers.hospitalNumbers.join(', ') : '';
+      }
+      
+      // Add priority issues
+      if (analysis.priorityIssues && analysis.priorityIssues.length > 0) {
+        row['Priority Issues'] = analysis.priorityIssues.join('; ');
+      }
+      
+      // Add immediate actions
+      if (analysis.safetyAssessment?.immediateActions && analysis.safetyAssessment.immediateActions.length > 0) {
+        row['Immediate Actions'] = analysis.safetyAssessment.immediateActions.join('; ');
+      }
+      
+      // Add detailed findings
+      if (analysis.detailedFindings) {
+        const findings = analysis.detailedFindings;
+        
+        // Image quality issues
+        if (findings.imageQualityIssues) {
+          row['Image Quality Issues'] = findings.imageQualityIssues.issues ? findings.imageQualityIssues.issues.join('; ') : '';
+          row['Image Quality Score'] = findings.imageQualityIssues.score || 'N/A';
+        }
+        
+        // Page sequence issues
+        if (findings.pageSequence) {
+          row['Page Sequence Issues'] = findings.pageSequence.issues ? findings.pageSequence.issues.join('; ') : '';
+          row['Page Sequence Score'] = findings.pageSequence.score || 'N/A';
+        }
+        
+        // Data extraction issues
+        if (findings.dataExtraction) {
+          row['Data Extraction Issues'] = findings.dataExtraction.issues ? findings.dataExtraction.issues.join('; ') : '';
+          row['Data Extraction Score'] = findings.dataExtraction.score || 'N/A';
+        }
+      }
+      
+      // Add summary table details
+      if (analysis.summaryTable && analysis.summaryTable.length > 0) {
+        const issueTypes = analysis.summaryTable.map(issue => issue.issueType).join('; ');
+        const issueCounts = analysis.summaryTable.map(issue => issue.count).join('; ');
+        const pagesAffected = analysis.summaryTable.map(issue => issue.pagesAffected).join('; ');
+        
+        row['Issue Types'] = issueTypes;
+        row['Issue Counts'] = issueCounts;
+        row['Pages Affected'] = pagesAffected;
+      }
+      
+      excelData.push(row);
+    });
+    
+    // Create workbook and worksheet
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet(excelData);
+    
+    // Auto-size columns
+    const columnWidths = [];
+    Object.keys(excelData[0] || {}).forEach(key => {
+      columnWidths.push({ wch: Math.max(key.length, 15) });
+    });
+    worksheet['!cols'] = columnWidths;
+    
+    // Add worksheet to workbook
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Analysis Results');
+    
+    return workbook;
+  } catch (error) {
+    console.error('Error creating Excel file:', error);
+    throw error;
+  }
+};
+
+// IPC handler for Excel export
+ipcMain.handle('export-to-excel', async (event, analysisResults) => {
+  try {
+    // Show save dialog
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save Analysis Results',
+      defaultPath: `ScanAuditor_Results_${new Date().toISOString().split('T')[0]}.xlsx`,
+      filters: [
+        { name: 'Excel Files', extensions: ['xlsx'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+    
+    if (!result.canceled && result.filePath) {
+      const workbook = exportToExcel(analysisResults);
+      XLSX.writeFile(workbook, result.filePath);
+      return { success: true, filePath: result.filePath };
+    } else {
+      return { success: false, canceled: true };
+    }
+  } catch (error) {
+    console.error('Export error:', error);
+    return { success: false, error: error.message };
   }
 });
 

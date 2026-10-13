@@ -1,37 +1,53 @@
-MEDICAL RECORD - EMERGENCY DEPARTMENT
+ST. JUDE CHILDREN'S RESEARCH HOSPITAL
+PATIENT MEDICAL RECORD - PAGE 1
 
-Date: 15/12/2024
-Location: Emergency Department
-Provider: Dr. Michael Chen
+NAME: Emily Rodriguez
+Hospital #: 23456
+Date of Birth: 07/22/2010
+Admission Date: 12/01/2023
 
-PATIENT 1:
-Patient Name: Mary Johnson
-Hospital Number: 234567
-Date of Birth: 22/07/1978
-Chief Complaint: Chest pain
-Assessment: Stable, discharged with follow-up
+PRIMARY DIAGNOSIS: Hodgkin lymphoma
+SECONDARY DIAGNOSIS: None
 
-PATIENT 2:
-Patient Name: Robert Davis
-Hospital Number: 345678
-Date of Birth: 10/11/1992
-Chief Complaint: Ankle injury
-Assessment: Sprain, treated and discharged
+VITAL SIGNS:
+Temperature: 99.1°F
+Blood Pressure: 105/65 mmHg
+Heart Rate: 90 bpm
 
-PATIENT 3:
-Patient Name: Lisa Thompson
-Hospital Number: 456789
-Date of Birth: 05/09/1988
-Chief Complaint: Fever and cough
-Assessment: Upper respiratory infection, prescribed antibiotics
+MEDICATIONS:
+- ABVD chemotherapy protocol
+- Ondansetron 4mg as needed
 
-TRIAGE NOTES:
-All patients were seen within 2 hours of arrival. No critical cases. Standard protocols followed.
+PHYSICIAN: Dr. Lisa Thompson, M.D.
+NURSING STAFF: Maria Garcia, RN
+NEXT OF KIN: Carlos Rodriguez (Father)
 
-DISCHARGE SUMMARY:
-- Mary Johnson: Discharged at 14:30
-- Robert Davis: Discharged at 15:45
-- Lisa Thompson: Discharged at 16:20
+---
 
-Signed: Dr. Michael Chen
-Date: 15/12/2024 
+ST. JUDE CHILDREN'S RESEARCH HOSPITAL
+PATIENT MEDICAL RECORD - PAGE 2
+
+NAME: David Williams
+Hospital #: 34567
+Date of Birth: 11/08/2015
+Admission Date: 12/02/2023
+
+PRIMARY DIAGNOSIS: Wilms tumor
+SECONDARY DIAGNOSIS: Hypertension
+
+VITAL SIGNS:
+Temperature: 98.8°F
+Blood Pressure: 130/85 mmHg
+Heart Rate: 88 bpm
+
+MEDICATIONS:
+- Vincristine 1.5mg/m²
+- Dactinomycin 0.045mg/kg
+- Amlodipine 2.5mg daily
+
+PHYSICIAN: Dr. James Wilson, M.D.
+NURSING STAFF: Patricia Brown, RN
+NEXT OF KIN: Michelle Williams (Mother)
+
+TREATMENT PLAN:
+Patient scheduled for nephrectomy on 12/05/2023. Pre-operative evaluation completed. Family education provided regarding surgical procedure and post-operative care. 

@@ -40,6 +40,12 @@ const setupEventListeners = () => {
     fileUploadArea.addEventListener('drop', handleFileDrop);
     fileUploadArea.addEventListener('dragenter', handleDragEnter);
     fileUploadArea.addEventListener('dragleave', handleDragLeave);
+    
+    // Export functionality
+    const exportButton = document.getElementById('export-excel-btn');
+    if (exportButton) {
+        exportButton.addEventListener('click', exportToExcel);
+    }
 };
 
 // File selection handler
@@ -824,3 +830,40 @@ const togglePrivacy = (button, type) => {
         }
     }
 }; 
+
+// Excel export functionality
+const exportToExcel = async () => {
+    if (!analysisResults || analysisResults.length === 0) {
+        showNotification('No analysis results to export', 'warning');
+        return;
+    }
+    
+    try {
+        const exportButton = document.getElementById('export-excel-btn');
+        const originalText = exportButton.innerHTML;
+        
+        // Show loading state
+        exportButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
+        exportButton.disabled = true;
+        
+        const result = await window.electronAPI.exportToExcel(analysisResults);
+        
+        if (result.success) {
+            showNotification(`Excel file saved successfully to: ${result.filePath}`, 'success');
+        } else if (result.canceled) {
+            showNotification('Export cancelled', 'info');
+        } else {
+            throw new Error(result.error || 'Export failed');
+        }
+    } catch (error) {
+        console.error('Export error:', error);
+        showNotification('Export failed: ' + error.message, 'error');
+    } finally {
+        // Restore button state
+        const exportButton = document.getElementById('export-excel-btn');
+        exportButton.innerHTML = originalText;
+        exportButton.disabled = false;
+    }
+};
+
+ 

@@ -489,6 +489,82 @@ EXAMPLE FORMAT (replace with actual data found):
     return sortedByWordCount[0];
   }
 
+  // Check if two hospital numbers are similar (fuzzy matching for OCR errors)
+  areHospitalNumbersSimilar(num1, num2) {
+    if (num1 === num2) return true;
+    
+    // Convert to strings and ensure they're the same length
+    const str1 = num1.toString().padStart(6, '0');
+    const str2 = num2.toString().padStart(6, '0');
+    
+    if (str1.length !== str2.length) return false;
+    
+    // Count differences
+    let differences = 0;
+    for (let i = 0; i < str1.length; i++) {
+      if (str1[i] !== str2[i]) {
+        differences++;
+      }
+    }
+    
+    // Allow 1 digit difference (OCR error tolerance)
+    return differences <= 1;
+  }
+
+  // Consolidate similar hospital numbers (fuzzy matching)
+  consolidateHospitalNumbers(hospitalNumbers) {
+    if (hospitalNumbers.length <= 1) return hospitalNumbers;
+    
+    const consolidated = [];
+    const processed = new Set();
+    
+    for (let i = 0; i < hospitalNumbers.length; i++) {
+      if (processed.has(i)) continue;
+      
+      const current = hospitalNumbers[i];
+      const similarNumbers = [current];
+      
+      // Check for similar numbers
+      for (let j = i + 1; j < hospitalNumbers.length; j++) {
+        if (processed.has(j)) continue;
+        
+        const other = hospitalNumbers[j];
+        if (this.areHospitalNumbersSimilar(current, other)) {
+          similarNumbers.push(other);
+          processed.add(j);
+          console.log(`[COMBINE] Found similar hospital numbers: "${current}" and "${other}"`);
+        }
+      }
+      
+      // Choose the most common or first number
+      const bestNumber = this.selectBestHospitalNumber(similarNumbers);
+      consolidated.push(bestNumber);
+      processed.add(i);
+    }
+    
+    return consolidated;
+  }
+
+  // Select the best hospital number from a list of similar numbers
+  selectBestHospitalNumber(numbers) {
+    if (numbers.length === 1) return numbers[0];
+    
+    // Prefer numbers that appear more frequently
+    const frequency = {};
+    numbers.forEach(num => {
+      frequency[num] = (frequency[num] || 0) + 1;
+    });
+    
+    // Sort by frequency, then by value
+    const sorted = numbers.sort((a, b) => {
+      const freqDiff = frequency[b] - frequency[a];
+      if (freqDiff !== 0) return freqDiff;
+      return a.localeCompare(b);
+    });
+    
+    return sorted[0];
+  }
+
   // Analyze images with Gemma 3n for quality and document issues
   async analyzeImagesWithGemma(imagePaths, fileName) {
     console.log(`[ANALYSIS] Starting image analysis for ${imagePaths.length} images`);
@@ -871,26 +947,42 @@ IMPORTANT:
     console.log(`[COMBINE] All names before consolidation: ${allNameStrings.join(', ')}`);
     combinedAnalysis.patientIdentifiers.names = this.consolidateNameVariations(allNameStrings);
     console.log(`[COMBINE] Names after consolidation: ${combinedAnalysis.patientIdentifiers.names.join(', ')}`);
-    combinedAnalysis.patientIdentifiers.hospitalNumbers = allHospitalNumbers.map(item => item.number);
+    
+    // Consolidate hospital numbers with fuzzy matching
+    const allHospitalNumberStrings = allHospitalNumbers.map(item => item.number);
+    console.log(`[COMBINE] All hospital numbers before consolidation: ${allHospitalNumberStrings.join(', ')}`);
+    combinedAnalysis.patientIdentifiers.hospitalNumbers = this.consolidateHospitalNumbers(allHospitalNumberStrings);
+    console.log(`[COMBINE] Hospital numbers after consolidation: ${combinedAnalysis.patientIdentifiers.hospitalNumbers.join(', ')}`);
+    
     combinedAnalysis.extractedDates = allDates;
     combinedAnalysis.pagesWithoutIdentifiers = pagesWithoutIdentifiers;
 
-    // Check for multiple patients (using consolidated names)
-    const uniqueNumbers = [...new Set(allHospitalNumbers.map(item => item.number))];
+    // Check for multiple patients (using consolidated names and numbers)
+    const uniqueNumbers = combinedAnalysis.patientIdentifiers.hospitalNumbers;
     
     if (combinedAnalysis.patientIdentifiers.names.length > 1) {
+      // Multiple different patient names found
       combinedAnalysis.multiplePatients = {
         detected: true,
         evidence: `Multiple different patient names found: ${combinedAnalysis.patientIdentifiers.names.join(', ')}`,
         pages: [...new Set(allNames.map(item => item.page))]
       };
-    } else if (uniqueNumbers.length > 1 && combinedAnalysis.patientIdentifiers.names.length === 1) {
-      // Same name but different hospital numbers
-      combinedAnalysis.multiplePatients = {
-        detected: true,
-        evidence: `Same patient name (${combinedAnalysis.patientIdentifiers.names[0]}) found with multiple different hospital numbers: ${uniqueNumbers.join(', ')}. This may indicate multiple patients or data inconsistency.`,
-        pages: [...new Set(allHospitalNumbers.map(item => item.page))]
-      };
+    } else if (uniqueNumbers.length > 1) {
+      if (combinedAnalysis.patientIdentifiers.names.length === 1) {
+        // Same name but different hospital numbers
+        combinedAnalysis.multiplePatients = {
+          detected: true,
+          evidence: `Same patient name (${combinedAnalysis.patientIdentifiers.names[0]}) found with multiple different hospital numbers: ${uniqueNumbers.join(', ')}. This may indicate multiple patients or data inconsistency.`,
+          pages: [...new Set(allHospitalNumbers.map(item => item.page))]
+        };
+      } else if (combinedAnalysis.patientIdentifiers.names.length === 0) {
+        // No patient names but different hospital numbers - multiple patients detected
+        combinedAnalysis.multiplePatients = {
+          detected: true,
+          evidence: `Multiple different hospital numbers found without patient names: ${uniqueNumbers.join(', ')}. This indicates multiple patients in the document.`,
+          pages: [...new Set(allHospitalNumbers.map(item => item.page))]
+        };
+      }
     }
 
     // Check for date issues (chronological order)

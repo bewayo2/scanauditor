@@ -1,41 +1,38 @@
-MEDICAL RECORD
+ST. JUDE CHILDREN'S RESEARCH HOSPITAL
+PATIENT MEDICAL RECORD
 
-Patient Name: John Smith
-Date of Birth: 15/03/1985
-Hospital Number: 123456
+NAME: Sarah Johnson
+Hospital #: 12345
+Date of Birth: 03/15/2012
+Admission Date: 11/20/2023
+Discharge Date: 11/25/2023
 
-Date of Visit: 15/12/2024
-Provider: Dr. Sarah Johnson
+PRIMARY DIAGNOSIS: Acute lymphoblastic leukemia
+SECONDARY DIAGNOSIS: None
 
-CHIEF COMPLAINT:
-Patient presents with persistent headache and fatigue for the past 2 weeks.
-
-HISTORY OF PRESENT ILLNESS:
-Mr. Smith reports experiencing severe headaches, particularly in the morning hours. The pain is described as throbbing and localized to the frontal region. He also reports feeling unusually tired despite adequate sleep. No previous history of similar symptoms.
-
-PHYSICAL EXAMINATION:
-- Vital Signs: BP 140/90, HR 72, Temp 98.6°F, RR 16
-- General: Alert and oriented, appears fatigued
-- HEENT: Normocephalic, atraumatic
-- Cardiovascular: Regular rate and rhythm, no murmurs
-- Respiratory: Clear to auscultation bilaterally
-- Neurological: Cranial nerves II-XII intact
-
-ASSESSMENT:
-1. Tension headache
-2. Fatigue, unspecified
-
-PLAN:
-1. Prescribed ibuprofen 400mg TID for headache
-2. Recommended stress management techniques
-3. Follow-up appointment in 2 weeks
-4. Consider sleep study if symptoms persist
+VITAL SIGNS:
+Temperature: 98.6°F
+Blood Pressure: 110/70 mmHg
+Heart Rate: 85 bpm
+Respiratory Rate: 18/min
 
 MEDICATIONS:
-- Ibuprofen 400mg TID for 7 days
+- Methotrexate 50mg daily
+- Prednisone 20mg twice daily
+- Allopurinol 100mg daily
 
-FOLLOW-UP:
-Return in 2 weeks for re-evaluation.
+TREATMENT PLAN:
+Patient received induction chemotherapy protocol. Tolerated treatment well with minimal side effects. White blood cell count decreased as expected. Patient discharged with follow-up appointment scheduled for 12/01/2023.
 
-Signed: Dr. Sarah Johnson
-Date: 15/12/2024 
+NURSING NOTES:
+Patient is alert and oriented. No complaints of pain. Eating well and maintaining adequate hydration. Family education provided regarding medication administration and signs of infection.
+
+PHYSICIAN: Dr. Michael Chen, M.D.
+NURSING STAFF: Jennifer Rodriguez, RN
+NEXT OF KIN: Robert Johnson (Father)
+
+DISCHARGE INSTRUCTIONS:
+- Continue all medications as prescribed
+- Monitor for fever, bleeding, or infection
+- Return to clinic for scheduled follow-up
+- Contact clinic immediately if any concerning symptoms develop 

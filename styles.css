@@ -285,6 +285,13 @@ body {
     backdrop-filter: blur(10px);
 }
 
+.results-actions {
+    margin-top: 1.5rem;
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+}
+
 /* Summary Table Styles */
 .summary-table {
     margin: 1.5rem 0;
