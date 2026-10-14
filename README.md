@@ -1,183 +1,120 @@
-# ScanAuditor - Comprehensive Medical Document Analysis
+# ScanAuditor
 
-ScanAuditor is an advanced medical document analysis tool that uses AI to comprehensively analyze scanned handwritten medical records for data integrity, quality issues, and compliance.
+ScanAuditor is a local Electron application for auditing scanned PDF medical records. It converts every PDF page to an image, uses local Ollama models to extract evidence, and then applies deterministic JavaScript rules to decide whether the document needs review.
 
-## New Analysis Strategy
+## Current audit pipeline
 
-ScanAuditor now uses a comprehensive multi-stage analysis approach:
+1. **PDF conversion** — every page is converted to a PNG with `pdf2image` and Poppler.
+2. **OCR** — `qwen2.5vl:7b` extracts text from each page image.
+3. **Structured extraction** — `gemma3n:latest` extracts patient-name fields, hospital-number fields, and dates from each page. The model does not decide whether the document is safe.
+4. **Visual checks** — `qwen2.5vl:7b` checks every page for blur, darkness, unreadable content, cut-off/incomplete pages, orientation problems, and possible duplicates.
+5. **Deterministic safety checks** — JavaScript calculates identifier coverage, checks whether every page was successfully processed, detects conflicting patient identifiers, validates critical dates, and applies the final pass/review decision.
 
-### 1. **PaddleOCR for Handwriting Recognition**
-- Uses PaddleOCR (fastest open-source OCR for handwriting)
-- Extracts text from all pages of scanned documents
-- Optimized for medical handwriting recognition
-- Processes entire documents, not just individual pages
+## Important behavior
 
-### 2. **Gemma 3n 4b for Text Analysis**
-- Analyzes extracted text for patient names and hospital numbers (5-6 digit numbers)
-- Detects multiple patients in single files
-- Identifies date mismatches and inconsistencies
-- Validates data integrity across all pages
+- **PDF only.** The current production audit path intentionally accepts only PDF files.
+- **Every page is processed.** There is no five-page testing limit.
+- **OCR failures never count as successful coverage.** Any failed page makes the audit incomplete and prevents a `Safe for Use` result.
+- **Hospital numbers are exact identifiers.** Numbers that differ by one digit are kept separate and treated as a possible patient-identity conflict.
+- **Names are merged conservatively.** Sharing only a surname is not enough to treat two people as the same patient.
+- **Original PDFs are not copied to an uploads folder.** The application reads the selected file in place. Temporary page images are deleted after each analysis.
+- **Production logs do not print extracted medical text or patient identifiers.**
+- **Excel export contains clear-text patient identifiers.** The UI warns before export.
 
-### 3. **Gemma 3n 4b for Image Analysis**
-- Analyzes image quality and document structure
-- Detects blurry, dark, or unreadable pages
-- Identifies missing pages and duplicates
-- Checks page orientation and completeness
+## Safety decision
 
-### 4. **Comprehensive Report Generation**
-- Generates detailed safety assessments
-- Provides specific recommendations
-- Creates actionable compliance reports
-- Determines if files are safe for use
+A document is not marked safe when any of these conditions is true:
 
-## Features
+- one or more pages failed OCR or structured extraction;
+- visual analysis failed for part of the document;
+- fewer than 50% of all document pages contain a recognized patient name or hospital number;
+- more than one distinct patient name or hospital number is present;
+- a discharge date is earlier than an admission date;
+- a page is unreadable, cut off, or incomplete.
 
-- **Multi-Page Analysis**: Processes entire documents, not just individual pages
-- **Handwriting Recognition**: Advanced OCR optimized for medical handwriting
-- **Data Integrity Checks**: Validates patient names and hospital numbers, dates, and consistency
-- **Quality Assessment**: Evaluates image quality and document completeness
-- **Safety Assessment**: Determines if documents are safe for clinical use
-- **Comprehensive Reporting**: Detailed reports with specific recommendations
+Blur, darkness, light pages, orientation issues, duplicate pages, and chronological-order warnings are reported separately and can trigger manual review recommendations.
 
-## Report Format
+## Prerequisites
 
-Each analysis generates a comprehensive report including:
+- Node.js 18 or later
+- Python 3.10 or later
+- Poppler for PDF conversion
+- Ollama
+- Ollama models:
 
-1. **File Information**: Name, scan date, total pages
-2. **Summary Table**: Quick overview of all detected issues
-3. **Detailed Findings**: 
-   - Image quality issues (blurry, dark, unreadable pages)
-   - Page sequence issues (missing, duplicate, misoriented pages)
-   - Data extraction issues (missing identifiers, multiple patients, date mismatches)
-4. **Recommendations**: Specific actions needed
-5. **Safety Assessment**: Whether the file is safe for use
-6. **Immediate Actions**: Critical issues requiring attention
+```bash
+ollama pull qwen2.5vl:7b
+ollama pull gemma3n:latest
+```
 
 ## Installation
 
-### Prerequisites
-- Node.js (v16 or higher)
-- Python 3.8 or higher
-- Ollama (with gemma3n:latest model)
+```bash
+npm install
+```
 
-### Setup
+On Windows, create the Python environment with either:
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd ScanAuditor
-   ```
+```bat
+setup_python_env.bat
+```
 
-2. **Install Node.js dependencies**
-   ```bash
-   npm install
-   ```
+or:
 
-3. **Set up Python environment**
-   ```bash
-   # Windows (Command Prompt)
-   setup_python_env.bat
-   
-   # Windows (PowerShell)
-   .\setup_python_env.ps1
-   ```
+```powershell
+.\setup_python_env.ps1
+```
 
-4. **Install Ollama models**
-   ```bash
-   ollama pull gemma3n:latest
-   ```
+Both setup scripts create the same `paddleocr_env` environment used by the application.
 
-5. **Start the application**
-   ```bash
-   npm start
-   ```
+### Poppler
 
-## Usage
+`pdf_to_images.py` looks for Poppler in this order:
 
-1. **Launch ScanAuditor**
-   - The application will start and connect to Ollama
-   - Status indicators show connection status
+1. the `POPPLER_PATH` environment variable;
+2. `poppler-windows/poppler-24.08.0/Library/bin` relative to the repository;
+3. `poppler-windows/Library/bin` relative to the repository;
+4. Poppler available on the system `PATH`.
 
-2. **Upload Documents**
-   - Drag and drop PDF files or click to select
-   - Supports multi-page scanned documents
-   - Handles handwritten medical records
+There is no hard-coded developer-machine path.
 
-3. **Analysis Process**
-   - Documents are converted to images
-   - PaddleOCR extracts text from all pages
-   - Gemma 3n analyzes text for data integrity
-   - Gemma 3n analyzes images for quality issues
-   - Comprehensive report is generated
+## Run
 
-4. **Review Results**
-   - View summary statistics
-   - Examine detailed findings
-   - Check safety assessment
-   - Follow recommendations
+Make sure Ollama is running, then:
 
-## Analysis Criteria
+```bash
+npm start
+```
 
-### Files Considered UNSAFE:
-- Missing patient names or hospital numbers on more than 50% of pages
-- Pages from multiple patients mixed together
-- Critical date mismatches (e.g., discharge before admission)
-- Missing critical information affecting patient care
+For the development console:
 
-### Files Considered SAFE:
-- Minor quality issues that don't affect identification
-- Missing patient names or hospital numbers on less than 50% of pages
-- Duplicate pages (when correct page is present)
-- Minor orientation issues (readable content)
+```bash
+npm run dev
+```
 
-## Technical Details
+## Tests and syntax checks
 
-### OCR Technology
-- **PaddleOCR**: Fastest open-source OCR for handwriting
-- **Optimized Settings**: Configured for medical documents
-- **Multi-language Support**: English medical terminology
-- **Image Preprocessing**: Enhanced contrast and noise reduction
+```bash
+npm test
+npm run check
+```
 
-### AI Models
-- **Gemma 3n 4b**: Google's latest open-source model
-- **Text Analysis**: Patient identification and data validation
-- **Image Analysis**: Quality assessment and document structure
-- **Local Processing**: All analysis done locally via Ollama
+The unit tests cover identity matching, hospital-number conflicts, failed OCR coverage, full-document coverage, critical image failures, and a clean passing case.
 
-### Performance
-- **Fast Processing**: PaddleOCR provides rapid text extraction
-- **Accurate Recognition**: Optimized for medical handwriting
-- **Comprehensive Analysis**: Multi-stage validation process
-- **Detailed Reporting**: Actionable insights and recommendations
+## Interactive learning
 
-## Troubleshooting
+The optional learning CLI stores human corrections in `learning_data.json`. The production analyzer reads the most recent corrected examples and uses them as extraction examples. This is few-shot prompting; it does **not** retrain the underlying Ollama model.
 
-### Common Issues
+`learning_data.json` and `training_data.json` are excluded from Git because they may contain patient information.
 
-1. **Python Environment Setup**
-   - Ensure Python 3.8+ is installed
-   - Run setup script as administrator if needed
-   - Check virtual environment activation
+Run the learning CLI with:
 
-2. **Ollama Connection**
-   - Ensure Ollama is running
-   - Verify gemma3n:latest model is installed
-   - Check port 11434 is available
+```bash
+node learn.js
+```
 
-3. **PaddleOCR Installation**
-   - May take time to download models
-   - Requires sufficient disk space
-   - Check internet connection during setup
+## Privacy and local processing
 
-### Support
-- Check logs in the application console
-- Verify all dependencies are installed
-- Ensure sufficient system resources
+OCR and analysis requests are sent only to the local Ollama service at `127.0.0.1:11434`. The Electron renderer does not run a local Express upload server. The renderer communicates with the Electron main process through a narrow preload API with context isolation and sandboxing enabled.
 
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request. 
+Temporary converted page images are removed after analysis. The application does not automatically delete the source PDF because it analyzes the original file selected by the user rather than creating its own copy.
