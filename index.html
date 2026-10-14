@@ -23,7 +23,7 @@
       <section class="file-section">
         <div class="section-header">
           <h2>File Selection</h2>
-          <p>Select PDF medical records to audit. Files are processed in place and are not copied into an uploads folder.</p>
+          <p>Select PDF medical records to audit for scan fidelity. Files are processed locally in place and are not copied into an uploads folder.</p>
         </div>
 
         <div class="file-upload-area" id="file-upload-area">
@@ -46,8 +46,8 @@
 
       <section class="results-section" id="results-section">
         <div class="section-header">
-          <h2>Analysis Results</h2>
-          <p>Safety status is calculated from deterministic checks after AI extraction.</p>
+          <h2>Automated QA Results</h2>
+          <p>AI extracts evidence and observations; deterministic rules assign the final automated QA status.</p>
         </div>
         <div class="results-container">
           <div class="results-summary" id="results-summary"></div>
@@ -61,8 +61,8 @@
       <div class="loading-overlay" id="loading-overlay">
         <div class="loading-content">
           <div class="spinner"></div>
-          <h3>Analyzing Files...</h3>
-          <p>Every page is processed. Large records can take time.</p>
+          <h3>Running Automated QA...</h3>
+          <p>Every PDF page is processed. Large records can take time.</p>
         </div>
       </div>
     </main>
