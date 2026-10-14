@@ -5,10 +5,43 @@ ScanAuditor is a local Electron application for auditing scanned PDF medical rec
 ## Current audit pipeline
 
 1. **PDF conversion** — every page is converted to a PNG with `pdf2image` and Poppler.
-2. **OCR** — `qwen2.5vl:7b` extracts text from each page image.
-3. **Structured extraction** — `gemma3n:latest` extracts patient-name fields, hospital-number fields, and dates from each page. The model does not decide whether the document is safe.
-4. **Visual checks** — `qwen2.5vl:7b` checks every page for blur, darkness, unreadable content, cut-off/incomplete pages, orientation problems, and possible duplicates.
+2. **OCR** — `qwen3-vl:8b-instruct` extracts text from each page image.
+3. **Structured extraction** — `qwen3:14b` extracts patient-name fields, hospital-number fields, and dates from each page. The model does not decide whether the document is safe.
+4. **Visual checks** — `qwen3-vl:8b-instruct` checks every page for blur, darkness, unreadable content, cut-off/incomplete pages, orientation problems, and possible duplicates.
 5. **Deterministic safety checks** — JavaScript calculates identifier coverage, checks whether every page was successfully processed, detects conflicting patient identifiers, validates critical dates, and applies the final pass/review decision.
+
+The default model pair is intended as the balanced accuracy/performance configuration for a workstation with roughly 24 GB of NVIDIA VRAM. The same vision model is reused for OCR and image-quality analysis, while the 14B text model handles structured identifier/date extraction.
+
+## Model configuration
+
+Model selection is centralized in `model_config.js`.
+
+Default models:
+
+```text
+Vision/OCR: qwen3-vl:8b-instruct
+Text analysis: qwen3:14b
+```
+
+You can override either model without editing source code:
+
+### PowerShell
+
+```powershell
+$env:SCANAUDITOR_VISION_MODEL="another-vision-model"
+$env:SCANAUDITOR_TEXT_MODEL="another-text-model"
+npm start
+```
+
+### Command Prompt
+
+```bat
+set SCANAUDITOR_VISION_MODEL=another-vision-model
+set SCANAUDITOR_TEXT_MODEL=another-text-model
+npm start
+```
+
+OCR and image-quality analysis always use the configured vision model. The Electron status check reads the same configuration, so it reports `Models Missing` when the selected models are not installed.
 
 ## Important behavior
 
@@ -39,12 +72,12 @@ Blur, darkness, light pages, orientation issues, duplicate pages, and chronologi
 - Node.js 18 or later
 - Python 3.10 or later
 - Poppler for PDF conversion
-- Ollama
+- Ollama 0.12.7 or later
 - Ollama models:
 
 ```bash
-ollama pull qwen2.5vl:7b
-ollama pull gemma3n:latest
+ollama pull qwen3-vl:8b-instruct
+ollama pull qwen3:14b
 ```
 
 ## Installation
@@ -66,6 +99,8 @@ or:
 ```
 
 Both setup scripts create the same `paddleocr_env` environment used by the application.
+
+For a complete Windows setup, `setup.bat` or `setup.ps1` also pulls the two default Ollama models.
 
 ### Poppler
 
@@ -99,11 +134,13 @@ npm test
 npm run check
 ```
 
-The unit tests cover identity matching, hospital-number conflicts, failed OCR coverage, full-document coverage, critical image failures, and a clean passing case.
+The tests cover identity matching, hospital-number conflicts, failed OCR coverage, full-document coverage, critical image failures, a clean passing case, and centralized model selection/overrides.
 
 ## Interactive learning
 
 The optional learning CLI stores human corrections in `learning_data.json`. The production analyzer reads the most recent corrected examples and uses them as extraction examples. This is few-shot prompting; it does **not** retrain the underlying Ollama model.
+
+The learning workflow uses the same centralized model configuration as the main application.
 
 `learning_data.json` and `training_data.json` are excluded from Git because they may contain patient information.
 
