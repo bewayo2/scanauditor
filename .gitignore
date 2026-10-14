@@ -16,19 +16,25 @@ yarn-debug.log*
 yarn-error.log*
 
 # Electron
-dist/
-dist-manual/
-build/
-
-# Bundled third-party binaries
-poppler-windows/
+/dist/
+/dist-manual/
+/build/
 *.asar
 
-# Temporary files
+# Bundled third-party binaries extracted locally
+poppler-windows/
+
+# Temporary/runtime files
 temp_images/
 uploads/
 *.tmp
 *.temp
+*.log
+logs/
+
+# Local medical feedback/training data may contain PHI
+learning_data.json
+training_data.json
 
 # IDE files
 .vscode/
@@ -40,10 +46,6 @@ uploads/
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-logs/
-
 # Environment variables
 .env
 .env.local
@@ -51,6 +53,6 @@ logs/
 .env.test.local
 .env.production.local
 
-# Test files
+# Test artifacts
 test_*.png
-test_*.pdf 
+test_*.pdf

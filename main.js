@@ -1,431 +1,214 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
-const express = require('express');
-const cors = require('cors');
-const multer = require('multer');
-const axios = require('axios');
+const { pathToFileURL } = require('url');
 const fs = require('fs-extra');
-const pdfParse = require('pdf-parse');
+const axios = require('axios');
 const XLSX = require('xlsx');
 const ComprehensiveAnalyzer = require('./comprehensive_analyzer');
 
-
 let mainWindow;
-let server;
-let ollamaStatus = 'disconnected';
 
-// Express server setup
-const setupBackend = () => {
-  const expressApp = express();
-  const PORT = 3001;
-
-  // Middleware
-  expressApp.use(cors());
-  expressApp.use(express.json());
-  expressApp.use(express.static('public'));
-
-  // Configure multer for file uploads
-  const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-      const uploadDir = path.join(__dirname, 'uploads');
-      fs.ensureDirSync(uploadDir);
-      cb(null, uploadDir);
-    },
-    filename: (req, file, cb) => {
-      cb(null, Date.now() + '-' + file.originalname);
-    }
-  });
-
-  const upload = multer({ storage });
-
-  // Test Ollama connection
-  const testOllamaConnection = async () => {
-    try {
-      const response = await axios.get('http://127.0.0.1:11434/api/tags');
-      ollamaStatus = 'connected';
-      console.log('Ollama connected successfully');
-      return true;
-    } catch (error) {
-      ollamaStatus = 'error';
-      console.error('Ollama connection failed:', error.message);
-      return false;
-    }
-  };
-
-  // Initialize Ollama models
-  const initializeModels = async () => {
-    try {
-      console.log('Initializing qwen2.5vl:7b model for OCR...');
-      const qwenResponse = await axios.post('http://127.0.0.1:11434/api/pull', {
-        name: 'qwen2.5vl:7b'
-      });
-      console.log('Qwen2.5-VL model initialization started');
-      
-      console.log('Initializing gemma3n:latest model for analysis...');
-      const gemmaResponse = await axios.post('http://127.0.0.1:11434/api/pull', {
-        name: 'gemma3n:latest'
-      });
-      console.log('Gemma3n model initialization started');
-      
-      return true;
-    } catch (error) {
-      console.error('Model initialization failed:', error.message);
-      return false;
-    }
-  };
-
-  // API Routes
-  expressApp.get('/api/status', (req, res) => {
-    res.json({ 
-      status: 'running', 
-      ollama: ollamaStatus,
-      timestamp: new Date().toISOString()
-    });
-  });
-
-  expressApp.post('/api/analyze', upload.array('files'), async (req, res) => {
-    try {
-      if (!req.files || req.files.length === 0) {
-        return res.status(400).json({ error: 'No files uploaded' });
-      }
-
-      const results = [];
-      
-      for (const file of req.files) {
-        const analysis = await analyzeFile(file);
-        results.push(analysis);
-      }
-
-      res.json({ results });
-    } catch (error) {
-      console.error('Analysis error:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Convert PDF to images using Python script
-  const convertPDFToImagesPython = async (pdfPath, outputDir, pageNumber = 1, dpi = 150) => {
-    const { spawn } = require('child_process');
-    
-    try {
-      console.log('=== PDF TO IMAGE CONVERSION (PYTHON) START ===');
-      console.log('PDF Path:', pdfPath);
-      console.log('Output Directory:', outputDir);
-      console.log('Page Number:', pageNumber);
-      console.log('DPI:', dpi);
-      
-      // Ensure output directory exists
-      await fs.ensureDir(outputDir);
-      
-      // Prepare Python command
-      const pythonPath = path.join(__dirname, 'pdf_converter_env', 'Scripts', 'python.exe');
-      const scriptPath = path.join(__dirname, 'pdf_to_images.py');
-      
-      console.log('Python Path:', pythonPath);
-      console.log('Script Path:', scriptPath);
-      
-      return new Promise((resolve, reject) => {
-        const pythonProcess = spawn(pythonPath, [
-          scriptPath,
-          pdfPath,
-          outputDir,
-          pageNumber.toString(),
-          dpi.toString()
-        ]);
-        
-        let stdout = '';
-        let stderr = '';
-        
-        pythonProcess.stdout.on('data', (data) => {
-          stdout += data.toString();
-        });
-        
-        pythonProcess.stderr.on('data', (data) => {
-          stderr += data.toString();
-        });
-        
-        pythonProcess.on('close', (code) => {
-          console.log('Python process exit code:', code);
-          console.log('Python stdout:', stdout);
-          if (stderr) console.log('Python stderr:', stderr);
-          
-          if (code === 0) {
-            try {
-              const result = JSON.parse(stdout.trim());
-              if (result.success) {
-                console.log('=== PDF TO IMAGE CONVERSION SUCCESS ===');
-                console.log('Image created at:', result.image_path);
-                resolve(result);
-              } else {
-                console.error('Python script failed:', result.error);
-                reject(new Error(result.error));
-              }
-            } catch (parseError) {
-              console.error('Failed to parse Python output:', parseError);
-              reject(parseError);
-            }
-          } else {
-            reject(new Error(`Python process failed with code ${code}: ${stderr}`));
-          }
-        });
-        
-        pythonProcess.on('error', (error) => {
-          console.error('Failed to start Python process:', error);
-          reject(error);
-        });
-      });
-      
-    } catch (error) {
-      console.error('=== PDF TO IMAGE CONVERSION FAILED ===');
-      console.error('Error:', error);
-      throw error;
-    }
-  };
-
-    // File analysis function using comprehensive analyzer
-  const analyzeFile = async (file) => {
-    try {
-      const analyzer = new ComprehensiveAnalyzer();
-      return await analyzer.analyzeFile(file);
-    } catch (error) {
-      console.error(`Error analyzing file ${file.originalname}:`, error);
-             return {
-         filename: file.originalname,
-         filepath: file.path,
-         analysis: {
-           error: error.message,
-          fileInformation: { fileName: file.originalname, scanDate: new Date().toISOString().split('T')[0], totalPages: 0 },
-          summaryTable: [],
-          detailedFindings: {},
-          recommendations: {},
-          safetyAssessment: { safeForUse: false, reason: 'Analysis failed', riskLevel: 'high', immediateActions: ['Manual review required'] },
-          complianceStatus: 'needs-review',
-          priorityIssues: ['Analysis failed']
-         },
-         timestamp: new Date().toISOString()
-       };
-    }
-  };
-
-  // Start server
-  server = expressApp.listen(PORT, () => {
-    console.log(`Backend server running on port ${PORT}`);
-  });
-
-  // Test Ollama connection on startup with retry
-  const connectToOllama = async () => {
-    let retries = 0;
-    const maxRetries = 5;
-    
-    while (retries < maxRetries) {
-      console.log(`Attempting to connect to Ollama (attempt ${retries + 1}/${maxRetries})...`);
-      const connected = await testOllamaConnection();
-      if (connected) {
-        await initializeModels();
-        break;
-      }
-      retries++;
-      if (retries < maxRetries) {
-        console.log('Waiting 2 seconds before retry...');
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-    }
-    
-    if (retries >= maxRetries) {
-      console.log('Failed to connect to Ollama after multiple attempts. Please ensure Ollama is running.');
-    }
-  };
-  
-  connectToOllama();
-
-  return expressApp;
-};
-
-// Create main window
-const createWindow = () => {
+function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    title: 'ScanAuditor - Medical Records Analysis',
     webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
-    },
-    icon: path.join(__dirname, 'assets', 'icon.png'),
-    title: 'ScanAuditor - Medical Records Analysis'
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false
+    }
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  const allowedUrl = pathToFileURL(path.join(__dirname, 'index.html')).href;
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url !== allowedUrl) event.preventDefault();
   });
 
   mainWindow.loadFile('index.html');
+  if (process.argv.includes('--dev')) mainWindow.webContents.openDevTools();
+}
 
-  // Open DevTools in development
-  if (process.argv.includes('--dev')) {
-    mainWindow.webContents.openDevTools();
+async function getOllamaStatus() {
+  try {
+    const response = await axios.get('http://127.0.0.1:11434/api/tags', { timeout: 2500 });
+    const names = (response.data.models || []).map(model => model.name);
+    return {
+      status: 'running',
+      ollama: 'connected',
+      models: {
+        ocr: names.some(name => name.startsWith('qwen2.5vl:7b')),
+        analysis: names.some(name => name.startsWith('gemma3n:latest'))
+      }
+    };
+  } catch (error) {
+    return { status: 'running', ollama: 'disconnected', models: { ocr: false, analysis: false } };
   }
-};
+}
 
-// App event handlers
+function failureResult(filePath, error) {
+  const fileName = path.basename(filePath || 'Unknown.pdf');
+  return {
+    filename: fileName,
+    analysis: {
+      fileInformation: {
+        fileName,
+        scanDate: new Date().toISOString().split('T')[0],
+        totalPages: 0
+      },
+      summaryTable: [{
+        issueType: 'Analysis Failed',
+        count: 1,
+        pagesAffected: 'Unknown',
+        description: error.message
+      }],
+      detailedFindings: {},
+      patientIdentifiers: { names: [], hospitalNumbers: [] },
+      identifierCoverage: {
+        totalPages: 0,
+        pagesProcessedSuccessfully: 0,
+        pagesFailed: 0,
+        pagesWithIdentifiers: 0,
+        pagesWithoutIdentifiers: 0,
+        coveragePercentage: 0,
+        complete: false,
+        isUnsafe: true
+      },
+      recommendations: {
+        manualReview: ['Resolve the analysis error and run the audit again.'],
+        rescanning: [],
+        verification: [],
+        corrections: []
+      },
+      safetyAssessment: {
+        safeForUse: false,
+        reason: 'Analysis failed. The document has not been cleared for use.',
+        riskLevel: 'high',
+        immediateActions: ['Manual review required.']
+      },
+      complianceStatus: 'needs-review',
+      priorityIssues: ['Analysis failed.']
+    },
+    timestamp: new Date().toISOString()
+  };
+}
+
+function excelSafe(value) {
+  if (value === null || value === undefined) return '';
+  if (Array.isArray(value)) return value.map(excelSafe).join('; ');
+  const text = String(value);
+  return /^[=+\-@]/.test(text) ? `'${text}` : text;
+}
+
+function exportToExcel(analysisResults) {
+  const rows = analysisResults.map(result => {
+    const analysis = result.analysis || {};
+    const coverage = analysis.identifierCoverage || {};
+    return {
+      'File Name': excelSafe(analysis.fileInformation?.fileName || result.filename || 'Unknown'),
+      'Scan Date': excelSafe(analysis.fileInformation?.scanDate || ''),
+      'Total Pages': analysis.fileInformation?.totalPages || 0,
+      'Safe for Use': analysis.safetyAssessment?.safeForUse ? 'Yes' : 'No',
+      'Risk Level': excelSafe(analysis.safetyAssessment?.riskLevel || 'Unknown'),
+      'Compliance Status': excelSafe(analysis.complianceStatus || 'Unknown'),
+      'Reason': excelSafe(analysis.safetyAssessment?.reason || ''),
+      'Identifier Coverage': Number.isFinite(coverage.coveragePercentage) ? `${coverage.coveragePercentage.toFixed(1)}%` : '0.0%',
+      'Pages Failed': coverage.pagesFailed || 0,
+      'Patient Names': excelSafe(analysis.patientIdentifiers?.names || []),
+      'Hospital Numbers': excelSafe(analysis.patientIdentifiers?.hospitalNumbers || []),
+      'Priority Issues': excelSafe(analysis.priorityIssues || []),
+      'Immediate Actions': excelSafe(analysis.safetyAssessment?.immediateActions || []),
+      'Issue Types': excelSafe((analysis.summaryTable || []).map(issue => issue.issueType)),
+      'Pages Affected': excelSafe((analysis.summaryTable || []).map(issue => issue.pagesAffected))
+    };
+  });
+
+  const workbook = XLSX.utils.book_new();
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  worksheet['!cols'] = Object.keys(rows[0] || {}).map(key => ({ wch: Math.max(15, Math.min(45, key.length + 8)) }));
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Analysis Results');
+  return workbook;
+}
+
 app.whenReady().then(() => {
-  setupBackend();
   createWindow();
-
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  if (process.platform !== 'darwin') app.quit();
 });
 
-// IPC handlers
 ipcMain.handle('select-files', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile', 'multiSelections'],
     filters: [
-      { name: 'Text Files', extensions: ['txt', 'pdf', 'doc', 'docx'] },
+      { name: 'PDF Files', extensions: ['pdf'] },
       { name: 'All Files', extensions: ['*'] }
     ]
   });
-  return result.filePaths;
+  if (result.canceled) return [];
+
+  const files = [];
+  for (const filePath of result.filePaths) {
+    if (path.extname(filePath).toLowerCase() !== '.pdf') continue;
+    try {
+      const stat = await fs.stat(filePath);
+      if (stat.isFile()) files.push({ path: filePath, name: path.basename(filePath), size: stat.size });
+    } catch (_) {
+      // Ignore entries that disappear between selection and stat.
+    }
+  }
+  return files;
 });
 
-ipcMain.handle('get-backend-status', async () => {
-  try {
-    const response = await axios.get('http://localhost:3001/api/status');
-    return response.data;
-  } catch (error) {
-    return { status: 'error', ollama: 'disconnected', error: error.message };
+ipcMain.handle('get-backend-status', getOllamaStatus);
+
+ipcMain.handle('analyze-files', async (_event, filePaths) => {
+  if (!Array.isArray(filePaths) || filePaths.length === 0) throw new Error('No files selected.');
+  if (filePaths.length > 25) throw new Error('Analyze no more than 25 files at one time.');
+
+  const analyzer = new ComprehensiveAnalyzer();
+  const results = [];
+
+  for (const requestedPath of filePaths) {
+    try {
+      if (typeof requestedPath !== 'string' || path.extname(requestedPath).toLowerCase() !== '.pdf') {
+        throw new Error('Only PDF files are supported.');
+      }
+      const realPath = await fs.realpath(requestedPath);
+      const stat = await fs.stat(realPath);
+      if (!stat.isFile()) throw new Error('Selected path is not a file.');
+      results.push(await analyzer.analyzeFile({ path: realPath, originalname: path.basename(realPath) }));
+    } catch (error) {
+      console.error('[ScanAuditor] analysis_failed', { file: path.basename(String(requestedPath || 'Unknown')), message: error.message });
+      results.push(failureResult(requestedPath, error));
+    }
   }
+
+  return { results };
 });
 
-// Excel export function
-const exportToExcel = (analysisResults) => {
+ipcMain.handle('export-to-excel', async (_event, analysisResults) => {
   try {
-    // Prepare data for Excel
-    const excelData = [];
-    
-    analysisResults.forEach((result) => {
-      const analysis = result.analysis;
-      
-      // Base row data
-      const row = {
-        'File Name': analysis.fileInformation?.fileName || result.filename || 'Unknown',
-        'Scan Date': analysis.fileInformation?.scanDate || 'Unknown',
-        'Total Pages': analysis.fileInformation?.totalPages || 0,
-        'Safe for Use': analysis.safetyAssessment?.safeForUse ? 'Yes' : 'No',
-        'Risk Level': analysis.safetyAssessment?.riskLevel || 'Unknown',
-        'Compliance Status': analysis.complianceStatus || 'Unknown',
-        'Reason': analysis.safetyAssessment?.reason || 'No reason provided',
-        'Total Issues': analysis.summaryTable ? analysis.summaryTable.length : 0
-      };
-      
-      // Add patient identifiers
-      if (analysis.patientIdentifiers) {
-        row['Patient Names'] = analysis.patientIdentifiers.names ? analysis.patientIdentifiers.names.join(', ') : '';
-        row['Hospital Numbers'] = analysis.patientIdentifiers.hospitalNumbers ? analysis.patientIdentifiers.hospitalNumbers.join(', ') : '';
-      }
-      
-      // Add priority issues
-      if (analysis.priorityIssues && analysis.priorityIssues.length > 0) {
-        row['Priority Issues'] = analysis.priorityIssues.join('; ');
-      }
-      
-      // Add immediate actions
-      if (analysis.safetyAssessment?.immediateActions && analysis.safetyAssessment.immediateActions.length > 0) {
-        row['Immediate Actions'] = analysis.safetyAssessment.immediateActions.join('; ');
-      }
-      
-      // Add detailed findings
-      if (analysis.detailedFindings) {
-        const findings = analysis.detailedFindings;
-        
-        // Image quality issues
-        if (findings.imageQualityIssues) {
-          row['Image Quality Issues'] = findings.imageQualityIssues.issues ? findings.imageQualityIssues.issues.join('; ') : '';
-          row['Image Quality Score'] = findings.imageQualityIssues.score || 'N/A';
-        }
-        
-        // Page sequence issues
-        if (findings.pageSequence) {
-          row['Page Sequence Issues'] = findings.pageSequence.issues ? findings.pageSequence.issues.join('; ') : '';
-          row['Page Sequence Score'] = findings.pageSequence.score || 'N/A';
-        }
-        
-        // Data extraction issues
-        if (findings.dataExtraction) {
-          row['Data Extraction Issues'] = findings.dataExtraction.issues ? findings.dataExtraction.issues.join('; ') : '';
-          row['Data Extraction Score'] = findings.dataExtraction.score || 'N/A';
-        }
-      }
-      
-      // Add summary table details
-      if (analysis.summaryTable && analysis.summaryTable.length > 0) {
-        const issueTypes = analysis.summaryTable.map(issue => issue.issueType).join('; ');
-        const issueCounts = analysis.summaryTable.map(issue => issue.count).join('; ');
-        const pagesAffected = analysis.summaryTable.map(issue => issue.pagesAffected).join('; ');
-        
-        row['Issue Types'] = issueTypes;
-        row['Issue Counts'] = issueCounts;
-        row['Pages Affected'] = pagesAffected;
-      }
-      
-      excelData.push(row);
-    });
-    
-    // Create workbook and worksheet
-    const workbook = XLSX.utils.book_new();
-    const worksheet = XLSX.utils.json_to_sheet(excelData);
-    
-    // Auto-size columns
-    const columnWidths = [];
-    Object.keys(excelData[0] || {}).forEach(key => {
-      columnWidths.push({ wch: Math.max(key.length, 15) });
-    });
-    worksheet['!cols'] = columnWidths;
-    
-    // Add worksheet to workbook
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Analysis Results');
-    
-    return workbook;
-  } catch (error) {
-    console.error('Error creating Excel file:', error);
-    throw error;
-  }
-};
-
-// IPC handler for Excel export
-ipcMain.handle('export-to-excel', async (event, analysisResults) => {
-  try {
-    // Show save dialog
     const result = await dialog.showSaveDialog(mainWindow, {
       title: 'Save Analysis Results',
       defaultPath: `ScanAuditor_Results_${new Date().toISOString().split('T')[0]}.xlsx`,
-      filters: [
-        { name: 'Excel Files', extensions: ['xlsx'] },
-        { name: 'All Files', extensions: ['*'] }
-      ]
+      filters: [{ name: 'Excel Files', extensions: ['xlsx'] }]
     });
-    
-    if (!result.canceled && result.filePath) {
-      const workbook = exportToExcel(analysisResults);
-      XLSX.writeFile(workbook, result.filePath);
-      return { success: true, filePath: result.filePath };
-    } else {
-      return { success: false, canceled: true };
-    }
+    if (result.canceled || !result.filePath) return { success: false, canceled: true };
+
+    const workbook = exportToExcel(Array.isArray(analysisResults) ? analysisResults : []);
+    XLSX.writeFile(workbook, result.filePath);
+    return { success: true, filePath: result.filePath };
   } catch (error) {
-    console.error('Export error:', error);
+    console.error('[ScanAuditor] export_failed', { message: error.message });
     return { success: false, error: error.message };
   }
 });
-
-// Cleanup on app quit
-app.on('before-quit', () => {
-  if (server) {
-    server.close();
-  }
-}); 

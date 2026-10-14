@@ -1,11 +1,13 @@
 {
   "name": "scan-auditor",
   "version": "1.0.0",
-  "description": "Medical document analysis tool",
+  "description": "Local medical document audit tool for scanned PDF records",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
+    "test": "node --test test/*.test.js",
+    "check": "node --check main.js && node --check preload.js && node --check renderer.js && node --check comprehensive_analyzer.js && node --check interactive_learning.js",
     "build": "electron-builder"
   },
   "dependencies": {
@@ -29,7 +31,12 @@
     },
     "files": [
       "**/*",
-      "!node_modules/**/*"
+      "!test/**/*",
+      "!temp_images/**/*",
+      "!paddleocr_env/**/*",
+      "!learning_data.json",
+      "!training_data.json",
+      "!*.log"
     ]
   }
 }

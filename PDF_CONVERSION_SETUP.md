@@ -1,83 +1,49 @@
-# PDF-to-Image Conversion Setup Guide
+# PDF-to-Image Conversion Setup
 
-## Current Issue
+ScanAuditor converts PDF pages to PNG images with Python `pdf2image`, which requires Poppler. ImageMagick is not used by the current application.
 
-The ScanAuditor application is designed to analyze medical records, including handwritten documents. However, handwritten PDFs cannot be read by standard text extraction tools like `pdf-parse`. To properly analyze handwritten documents, we need to convert PDF pages to images and use the vision model (`qwen2.5vl:7b`) to read the handwritten text.
+## Python environment
 
-## Problem
+Run one of the setup scripts from the repository root:
 
-The current system attempts to use PDF-to-image conversion libraries (`pdf2pic`, `pdf-img-convert`) but these require external dependencies that are not installed on your system:
+```bat
+setup_python_env.bat
+```
 
-- **ImageMagick** or **GraphicsMagick** (for image processing)
-- **Visual Studio Build Tools** (for compiling native dependencies)
+or:
 
-## Solutions
+```powershell
+.\setup_python_env.ps1
+```
 
-### Option 1: Install ImageMagick (Recommended)
+Both scripts create `paddleocr_env`, which is the environment used by `comprehensive_analyzer.js`.
 
-1. **Download ImageMagick for Windows:**
-   - Go to: https://imagemagick.org/script/download.php#windows
-   - Download the latest version for Windows
-   - Choose the version that matches your system (32-bit or 64-bit)
+## Poppler
 
-2. **Install ImageMagick:**
-   - Run the installer
-   - Make sure to check "Add application directory to your system path" during installation
-   - Complete the installation
+`pdf_to_images.py` searches for Poppler in this order:
 
-3. **Verify Installation:**
-   - Open a new Command Prompt or PowerShell
-   - Run: `magick --version`
-   - You should see ImageMagick version information
+1. `POPPLER_PATH` environment variable;
+2. `poppler-windows/poppler-24.08.0/Library/bin` relative to the repository;
+3. `poppler-windows/Library/bin` relative to the repository;
+4. Poppler executables available on the system `PATH`.
 
-4. **Restart the Application:**
-   - After installing ImageMagick, restart the ScanAuditor application
-   - The PDF-to-image conversion should now work
+This makes the application portable; there is no hard-coded `C:\Repos\...` dependency.
 
-### Option 2: Use Online PDF Converters (Alternative)
+## Processing behavior
 
-If you prefer not to install additional software, you can:
+- Every PDF page is converted and audited.
+- Pages are converted one at a time to reduce peak memory use.
+- Temporary PNG files are placed under `temp_images/` and deleted after each analysis.
+- OCR is performed locally with `qwen2.5vl:7b` through Ollama.
 
-1. **Convert PDFs manually:**
-   - Use online tools like:
-     - https://www.ilovepdf.com/pdf_to_image
-     - https://smallpdf.com/pdf-to-jpg
-     - https://convertio.co/pdf-jpg/
-   
-2. **Save images locally:**
-   - Convert each page of the handwritten PDF to JPG/PNG
-   - Save the images in a folder
-   - The vision model can analyze these images directly
+## Troubleshooting
 
-### Option 3: Use Different PDF Files
+If PDF conversion fails:
 
-If you have access to typed/printed medical records instead of handwritten ones, these can be analyzed directly without image conversion.
-
-## Current Status
-
-The application currently:
-- ✅ Detects handwritten documents correctly
-- ✅ Attempts enhanced text extraction
-- ✅ Provides clear feedback about the limitation
-- ❌ Cannot convert PDFs to images (missing dependencies)
-
-## Next Steps
-
-1. **Install ImageMagick** (Option 1 above)
-2. **Restart the application**
-3. **Test with your handwritten medical records**
-
-Once ImageMagick is installed, the application will be able to:
-- Convert PDF pages to high-quality images
-- Send these images to the vision model
-- Extract patient names from handwritten text
-- Provide accurate analysis of handwritten medical records
-
-## Technical Details
-
-The application uses:
-- `pdf2pic` library for PDF-to-image conversion
-- `qwen2.5vl:7b` vision model for reading handwritten text
-- Ollama for local AI processing
-
-The vision model can read handwritten text much better than text extraction tools, making it ideal for analyzing scanned handwritten medical records. 
+1. Confirm Python can import `pdf2image`:
+   ```bat
+   paddleocr_env\Scripts\python.exe -c "import pdf2image; print('ok')"
+   ```
+2. Confirm Poppler is installed or set `POPPLER_PATH` to its `bin` directory.
+3. Run `pdfinfo -v` or `pdftoppm -h` from a terminal if Poppler is on the system `PATH`.
+4. Run ScanAuditor again and review the non-PHI error message in the console.

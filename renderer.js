@@ -1,869 +1,349 @@
-// Global state
 let selectedFiles = [];
 let analysisResults = [];
 
-// DOM elements
-const selectFilesBtn = document.getElementById('select-files-btn');
-const clearFilesBtn = document.getElementById('clear-files-btn');
-const analyzeFilesBtn = document.getElementById('analyze-files-btn');
-const fileUploadArea = document.getElementById('file-upload-area');
-const selectedFilesDiv = document.getElementById('selected-files');
-const fileList = document.getElementById('file-list');
-const resultsSection = document.getElementById('results-section');
-const resultsSummary = document.getElementById('results-summary');
-const resultsDetails = document.getElementById('results-details');
-const loadingOverlay = document.getElementById('loading-overlay');
-const backendStatus = document.getElementById('backend-status');
-const ollamaStatus = document.getElementById('ollama-status');
+const byId = id => document.getElementById(id);
+const selectFilesBtn = byId('select-files-btn');
+const clearFilesBtn = byId('clear-files-btn');
+const analyzeFilesBtn = byId('analyze-files-btn');
+const fileUploadArea = byId('file-upload-area');
+const selectedFilesDiv = byId('selected-files');
+const fileList = byId('file-list');
+const resultsSection = byId('results-section');
+const resultsSummary = byId('results-summary');
+const resultsDetails = byId('results-details');
+const loadingOverlay = byId('loading-overlay');
+const backendStatus = byId('backend-status');
+const ollamaStatus = byId('ollama-status');
+const exportButton = byId('export-excel-btn');
 
-// Initialize app
-document.addEventListener('DOMContentLoaded', () => {
-    initializeApp();
-    setupEventListeners();
-    startStatusPolling();
-});
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
+}
 
-// Initialize the application
-const initializeApp = () => {
-    console.log('ScanAuditor initialized');
-    updateStatusIndicators();
-};
+function formatFileSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return 'Size unavailable';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
 
-// Setup event listeners
-const setupEventListeners = () => {
-    selectFilesBtn.addEventListener('click', handleFileSelection);
-    clearFilesBtn.addEventListener('click', clearSelectedFiles);
-    analyzeFilesBtn.addEventListener('click', analyzeSelectedFiles);
-    
-    // Drag and drop functionality
-    fileUploadArea.addEventListener('dragover', handleDragOver);
-    fileUploadArea.addEventListener('drop', handleFileDrop);
-    fileUploadArea.addEventListener('dragenter', handleDragEnter);
-    fileUploadArea.addEventListener('dragleave', handleDragLeave);
-    
-    // Export functionality
-    const exportButton = document.getElementById('export-excel-btn');
-    if (exportButton) {
-        exportButton.addEventListener('click', exportToExcel);
+function showNotification(message, type = 'info') {
+  const existing = document.querySelector('.notification');
+  if (existing) existing.remove();
+  const notification = el('div', `notification ${type}`, message);
+  document.body.appendChild(notification);
+  setTimeout(() => notification.remove(), 4500);
+}
+
+function showLoading(show) {
+  loadingOverlay.style.display = show ? 'flex' : 'none';
+  analyzeFilesBtn.disabled = show;
+  selectFilesBtn.disabled = show;
+  clearFilesBtn.disabled = show;
+}
+
+function addFiles(files) {
+  let added = 0;
+  for (const file of files) {
+    if (!file || !file.path || !file.name) continue;
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      showNotification(`${file.name} was skipped. Only PDF files are supported.`, 'warning');
+      continue;
     }
-};
-
-// File selection handler
-const handleFileSelection = async () => {
-    try {
-        console.log('Opening file selection dialog...');
-        const filePaths = await window.electronAPI.selectFiles();
-        console.log('Selected files:', filePaths);
-        
-        if (filePaths && filePaths.length > 0) {
-            addFilesToSelection(filePaths);
-            showNotification(`Selected ${filePaths.length} file(s)`, 'success');
-        } else {
-            showNotification('No files selected', 'info');
-        }
-    } catch (error) {
-        console.error('Error selecting files:', error);
-        showNotification('Error selecting files: ' + error.message, 'error');
+    if (!selectedFiles.some(existing => existing.path === file.path)) {
+      selectedFiles.push(file);
+      added += 1;
     }
-};
-
-// Add files to selection
-const addFilesToSelection = (filePaths) => {
-    console.log('Adding files to selection:', filePaths);
-    
-    let addedCount = 0;
-    filePaths.forEach(filePath => {
-        const fileName = filePath.split(/[\\/]/).pop();
-        const file = {
-            path: filePath,
-            name: fileName,
-            size: 0 // We'll get this from the file object later
-        };
-        
-        if (!selectedFiles.find(f => f.path === filePath)) {
-            selectedFiles.push(file);
-            addedCount++;
-            console.log('Added file:', fileName);
-        } else {
-            console.log('File already selected:', fileName);
-        }
-    });
-    
-    console.log(`Added ${addedCount} new files. Total selected: ${selectedFiles.length}`);
-    updateFileList();
-    showSelectedFiles();
-};
-
-// Add dropped files to selection (for drag and drop)
-const addDroppedFilesToSelection = (files) => {
-    console.log('Adding dropped files to selection:', files);
-    
-    let addedCount = 0;
-    files.forEach(file => {
-        const fileInfo = {
-            path: file.name, // Use name as path for dropped files
-            name: file.name,
-            size: file.size,
-            file: file // Store the actual file object
-        };
-        
-        if (!selectedFiles.find(f => f.name === file.name)) {
-            selectedFiles.push(fileInfo);
-            addedCount++;
-            console.log('Added dropped file:', file.name);
-        } else {
-            console.log('Dropped file already selected:', file.name);
-        }
-    });
-    
-    console.log(`Added ${addedCount} new dropped files. Total selected: ${selectedFiles.length}`);
-    updateFileList();
-    showSelectedFiles();
-};
-
-// Add more files function
-const addMoreFiles = () => {
-    handleFileSelection();
-};
-
-// Update file list display
-const updateFileList = () => {
-    fileList.innerHTML = '';
-    
-    selectedFiles.forEach((file, index) => {
-        const fileItem = document.createElement('div');
-        fileItem.className = 'file-item';
-        
-        fileItem.innerHTML = `
-            <div class="file-info">
-                <i class="fas fa-file-alt file-icon"></i>
-                <div>
-                    <div class="file-name">${file.name}</div>
-                    <div class="file-size">${formatFileSize(file.size)}</div>
-                </div>
-            </div>
-            <button class="btn btn-secondary" onclick="removeFile(${index})">
-                <i class="fas fa-times"></i>
-            </button>
-        `;
-        
-        fileList.appendChild(fileItem);
-    });
-    
-    // Add "Add More Files" button
-    const addMoreButton = document.createElement('div');
-    addMoreButton.className = 'add-more-files';
-    addMoreButton.innerHTML = `
-        <button class="btn btn-primary" onclick="addMoreFiles()">
-            <i class="fas fa-plus"></i> Add More Files
-        </button>
-    `;
-    fileList.appendChild(addMoreButton);
-};
-
-// Remove file from selection
-const removeFile = (index) => {
-    selectedFiles.splice(index, 1);
-    updateFileList();
-    
-    if (selectedFiles.length === 0) {
-        hideSelectedFiles();
-    }
-};
-
-// Clear all selected files
-const clearSelectedFiles = () => {
-    selectedFiles = [];
-    updateFileList();
-    hideSelectedFiles();
-};
-
-// Show selected files section
-const showSelectedFiles = () => {
+  }
+  updateFileList();
+  if (selectedFiles.length) {
     selectedFilesDiv.style.display = 'block';
     fileUploadArea.style.display = 'none';
-};
+  }
+  if (added) showNotification(`Added ${added} PDF file(s).`, 'success');
+}
 
-// Hide selected files section
-const hideSelectedFiles = () => {
-    selectedFilesDiv.style.display = 'none';
-    fileUploadArea.style.display = 'block';
-};
+function updateFileList() {
+  fileList.replaceChildren();
+  selectedFiles.forEach((file, index) => {
+    const item = el('div', 'file-item');
+    const info = el('div', 'file-info');
+    const textWrap = el('div');
+    textWrap.append(el('div', 'file-name', file.name), el('div', 'file-size', formatFileSize(file.size)));
+    info.appendChild(textWrap);
 
-
-
-// Analyze selected files
-const analyzeSelectedFiles = async () => {
-    if (selectedFiles.length === 0) {
-        showNotification('No files selected for analysis', 'warning');
-        return;
-    }
-    
-    try {
-        showLoading(true);
-        
-        // Convert file paths to File objects
-        const files = await Promise.all(
-            selectedFiles.map(async (fileInfo) => {
-                if (fileInfo.file) {
-                    // This is a dropped file, use the stored File object
-                    return fileInfo.file;
-                } else {
-                    // This is a selected file path, convert to File object
-                    const response = await fetch(`file://${fileInfo.path}`);
-                    const blob = await response.blob();
-                    return new File([blob], fileInfo.name, { type: blob.type });
-                }
-            })
-        );
-        
-        // Send files for analysis
-        const response = await window.electronAPI.analyzeFiles(files);
-        
-        if (response.results) {
-            analysisResults = response.results;
-            displayResults();
-            showNotification(`Analysis completed for ${selectedFiles.length} files`, 'success');
-        } else {
-            throw new Error('No results received from analysis');
-        }
-        
-    } catch (error) {
-        console.error('Analysis error:', error);
-        showNotification('Error during analysis: ' + error.message, 'error');
-    } finally {
-        showLoading(false);
-    }
-};
-
-// Display analysis results
-const displayResults = () => {
-    displayResultsSummary();
-    displayResultsDetails();
-    resultsSection.style.display = 'block';
-    
-    // Scroll to results
-    resultsSection.scrollIntoView({ behavior: 'smooth' });
-};
-
-// Display results summary
-const displayResultsSummary = () => {
-    const totalFiles = analysisResults.length;
-    const safeFiles = analysisResults.filter(r => 
-        r.analysis.safetyAssessment && r.analysis.safetyAssessment.safeForUse
-    ).length;
-    const unsafeFiles = totalFiles - safeFiles;
-    const totalIssues = analysisResults.reduce((sum, r) => 
-        sum + (r.analysis.summaryTable ? r.analysis.summaryTable.length : 0), 0);
-    
-    resultsSummary.innerHTML = `
-        <div class="summary-stats">
-            <div class="stat-card">
-                <div class="stat-number">${totalFiles}</div>
-                <div class="stat-label">Total Files</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">${safeFiles}</div>
-                <div class="stat-label">Safe for Use</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">${unsafeFiles}</div>
-                <div class="stat-label">Needs Review</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">${totalIssues}</div>
-                <div class="stat-label">Total Issues</div>
-            </div>
-        </div>
-    `;
-};
-
-// Display results details
-const displayResultsDetails = () => {
-    resultsDetails.innerHTML = '';
-    
-    analysisResults.forEach((result, index) => {
-        const resultCard = document.createElement('div');
-        resultCard.className = 'result-card';
-        
-        const analysis = result.analysis;
-        
-        // Handle comprehensive analysis format
-        if (analysis.fileInformation) {
-            // New comprehensive format
-            const isSafe = analysis.safetyAssessment && analysis.safetyAssessment.safeForUse;
-            const statusClass = isSafe ? 'pass' : 'fail';
-            const statusText = isSafe ? 'Safe for Use' : 'Needs Review';
-            const riskLevel = analysis.safetyAssessment ? analysis.safetyAssessment.riskLevel : 'unknown';
-            
-            // Build summary table
-            let summaryTableHtml = '';
-            if (analysis.summaryTable && analysis.summaryTable.length > 0) {
-                summaryTableHtml = `
-                    <div class="summary-table">
-                        <h4>Summary of Issues</h4>
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Issue Type</th>
-                                    <th>Count</th>
-                                    <th>Pages Affected</th>
-                                    <th>Description</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${analysis.summaryTable.map(issue => `
-                                    <tr>
-                                        <td>${issue.issueType}</td>
-                                        <td>${issue.count}</td>
-                                        <td>${issue.pagesAffected}</td>
-                                        <td>${issue.description || ''}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                `;
-            }
-            
-            // Build detailed findings
-            let detailedFindingsHtml = '';
-            if (analysis.detailedFindings) {
-                const findings = analysis.detailedFindings;
-                
-                // Collect all positive findings
-                const allPositiveFindings = [];
-                
-                // Image quality findings
-                if (findings.imageQualityIssues && findings.imageQualityIssues.positiveFindings) {
-                    allPositiveFindings.push(...findings.imageQualityIssues.positiveFindings);
-                }
-                
-                // Page sequence findings
-                if (findings.pageSequence && findings.pageSequence.positiveFindings) {
-                    allPositiveFindings.push(...findings.pageSequence.positiveFindings);
-                }
-                
-                // Data extraction findings
-                if (findings.dataExtraction && findings.dataExtraction.positiveFindings) {
-                    allPositiveFindings.push(...findings.dataExtraction.positiveFindings);
-                }
-                
-                // Display positive findings
-                if (allPositiveFindings.length > 0) {
-                    const positiveFindingsHtml = allPositiveFindings.map(finding => {
-                        // Handle both string and object formats
-                        if (typeof finding === 'string') {
-                            return `<div class="finding-item positive">${finding}</div>`;
-                        } else if (finding.type && (finding.type === 'patient_name' || finding.type === 'hospital_id')) {
-                            // Handle privacy-protected findings
-                            return `
-                                <div class="finding-item positive privacy-protected" data-type="${finding.type}" data-value="${finding.value}">
-                                    <span class="finding-label">${finding.label}:</span>
-                                    <span class="privacy-mask">${finding.masked}</span>
-                                    <button class="privacy-toggle" onclick="togglePrivacy(this, '${finding.type}')">
-                                        <i class="fas fa-eye"></i>
-                                    </button>
-                                </div>
-                            `;
-                        } else {
-                            return `<div class="finding-item positive">${finding}</div>`;
-                        }
-                    }).join('');
-                    
-                    detailedFindingsHtml = `
-                        <div class="finding-section">
-                            <h5>Detailed Findings</h5>
-                            ${positiveFindingsHtml}
-                        </div>
-                    `;
-                }
-                
-                // Image quality issues (only if there are actual issues)
-                let imageQualityHtml = '';
-                if (findings.imageQualityIssues) {
-                    const iq = findings.imageQualityIssues;
-                    const imageIssues = [];
-                    if (iq.blurryPages && iq.blurryPages.length > 0) imageIssues.push(`Blurry: ${iq.blurryPages.join(', ')}`);
-                    if (iq.darkPages && iq.darkPages.length > 0) imageIssues.push(`Dark: ${iq.darkPages.join(', ')}`);
-                    if (iq.lightPages && iq.lightPages.length > 0) imageIssues.push(`Light: ${iq.lightPages.join(', ')}`);
-                    if (iq.unreadablePages && iq.unreadablePages.length > 0) imageIssues.push(`Unreadable: ${iq.unreadablePages.join(', ')}`);
-                    
-                    if (imageIssues.length > 0) {
-                        imageQualityHtml = `
-                            <div class="finding-section">
-                                <h5>Image Quality Issues</h5>
-                                ${imageIssues.map(issue => `<div class="issue-item">${issue}</div>`).join('')}
-                            </div>
-                        `;
-                    }
-                }
-                
-                // Page sequence issues (only if there are actual issues)
-                let pageSequenceHtml = '';
-                if (findings.pageSequence) {
-                    const ps = findings.pageSequence;
-                    const sequenceIssues = [];
-                    if (ps.cutoffPages && ps.cutoffPages.length > 0) sequenceIssues.push(`Cut-off: ${ps.cutoffPages.join(', ')}`);
-                    if (ps.incompletePages && ps.incompletePages.length > 0) sequenceIssues.push(`Incomplete: ${ps.incompletePages.join(', ')}`);
-                    if (ps.duplicatePages && ps.duplicatePages.length > 0) {
-                        ps.duplicatePages.forEach(dup => {
-                            sequenceIssues.push(`Duplicates: ${dup.pages.join(' and ')}`);
-                        });
-                    }
-                    if (ps.orientationIssues) {
-                        const oi = ps.orientationIssues;
-                        if (oi.upsideDown && oi.upsideDown.length > 0) sequenceIssues.push(`Upside down: ${oi.upsideDown.join(', ')}`);
-                        if (oi.sideways && oi.sideways.length > 0) sequenceIssues.push(`Sideways: ${oi.sideways.join(', ')}`);
-                        if (oi.misaligned && oi.misaligned.length > 0) sequenceIssues.push(`Misaligned: ${oi.misaligned.join(', ')}`);
-                    }
-                    
-                    if (sequenceIssues.length > 0) {
-                        pageSequenceHtml = `
-                            <div class="finding-section">
-                                <h5>Page Sequence Issues</h5>
-                                ${sequenceIssues.map(issue => `<div class="issue-item">${issue}</div>`).join('')}
-                            </div>
-                        `;
-                    }
-                }
-                
-                // Data extraction issues (only if there are actual issues)
-                let dataExtractionHtml = '';
-                if (findings.dataExtraction) {
-                    const de = findings.dataExtraction;
-                    const dataIssues = [];
-                    if (de.pagesWithoutIdentifiers && de.pagesWithoutIdentifiers.length > 0) {
-                        dataIssues.push(`No identifiers: ${de.pagesWithoutIdentifiers.join(', ')}`);
-                    }
-                    if (de.multiplePatients && de.multiplePatients.detected) {
-                        dataIssues.push(`Multiple patients: ${de.multiplePatients.evidence}`);
-                    }
-                    if (de.dateMismatches && de.dateMismatches.length > 0) {
-                        de.dateMismatches.forEach(mismatch => {
-                            dataIssues.push(`Date issue: ${mismatch.description}`);
-                        });
-                    }
-                    
-                    // Add chronological issues
-                    if (de.chronologicalIssues && !de.chronologicalIssues.isChronological) {
-                        de.chronologicalIssues.issues.forEach(issue => {
-                            dataIssues.push(`Chronological issue: ${issue}`);
-                        });
-                    }
-                    
-                    if (dataIssues.length > 0) {
-                        dataExtractionHtml = `
-                            <div class="finding-section">
-                                <h5>Data Extraction Issues</h5>
-                                ${dataIssues.map(issue => `<div class="issue-item">${issue}</div>`).join('')}
-                            </div>
-                        `;
-                    }
-                }
-                
-                detailedFindingsHtml += imageQualityHtml + pageSequenceHtml + dataExtractionHtml;
-            }
-            
-
-            
-            // Build recommendations
-            let recommendationsHtml = '';
-            if (analysis.recommendations) {
-                const rec = analysis.recommendations;
-                const recommendations = [];
-                if (rec.manualReview && rec.manualReview.length > 0) recommendations.push(`Manual review: ${rec.manualReview.join(', ')}`);
-                if (rec.rescanning && rec.rescanning.length > 0) recommendations.push(`Rescan: ${rec.rescanning.join(', ')}`);
-                if (rec.verification && rec.verification.length > 0) recommendations.push(`Verify: ${rec.verification.join(', ')}`);
-                if (rec.corrections && rec.corrections.length > 0) recommendations.push(`Correct: ${rec.corrections.join(', ')}`);
-                
-                if (recommendations.length > 0) {
-                    recommendationsHtml = `
-                        <div class="recommendations-section">
-                            <h4>Recommendations</h4>
-                            ${recommendations.map(rec => `<div class="recommendation-item">${rec}</div>`).join('')}
-                        </div>
-                    `;
-                }
-            }
-            
-            resultCard.innerHTML = `
-                <div class="result-header">
-                    <div class="result-filename">${analysis.fileInformation.fileName}</div>
-                    <div class="result-status ${statusClass}">${statusText}</div>
-                </div>
-                <div class="result-details">
-                    <div class="detail-item">
-                        <div class="detail-label">Scan Date</div>
-                        <div class="detail-value">${analysis.fileInformation.scanDate}</div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">Total Pages</div>
-                        <div class="detail-value">${analysis.fileInformation.totalPages}</div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">Risk Level</div>
-                        <div class="detail-value">${riskLevel}</div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">Compliance Status</div>
-                        <div class="detail-value">${analysis.complianceStatus || 'Unknown'}</div>
-                    </div>
-                </div>
-                ${summaryTableHtml}
-                ${detailedFindingsHtml ? `
-                    <div class="detailed-findings">
-                        <h4>Detailed Findings</h4>
-                        ${detailedFindingsHtml}
-                    </div>
-                ` : ''}
-                ${recommendationsHtml}
-                ${analysis.safetyAssessment && analysis.safetyAssessment.immediateActions && analysis.safetyAssessment.immediateActions.length > 0 ? `
-                    <div class="immediate-actions">
-                        <h4>Immediate Actions Required</h4>
-                        ${analysis.safetyAssessment.immediateActions.map(action => `
-                            <div class="action-item">${action}</div>
-                        `).join('')}
-                    </div>
-                ` : ''}
-            `;
-        } else if (analysis.pagesWithHospitalNumbers !== undefined) {
-            // Legacy format - page-by-page hospital number analysis
-            const hasMultiplePatients = analysis.multiplePatients || false;
-            const hasIssues = analysis.issues && analysis.issues.length > 0;
-            const statusClass = hasMultiplePatients ? 'fail' : 'pass';
-            const statusText = hasMultiplePatients ? 'Multiple Patients Detected' : 'Single Patient';
-            
-            // Build pages with hospital numbers display - grouped by hospital number
-            let pagesDisplay = '';
-            if (analysis.pagesWithHospitalNumbers && analysis.pagesWithHospitalNumbers.length > 0) {
-                // Group pages by hospital number
-                const hospitalNumberPages = {};
-                analysis.pagesWithHospitalNumbers.forEach(page => {
-                    page.hospitalNumbers.forEach(hn => {
-                        if (!hospitalNumberPages[hn]) {
-                            hospitalNumberPages[hn] = [];
-                        }
-                        hospitalNumberPages[hn].push(page.pageNumber);
-                    });
-                });
-                
-                // Sort pages for each hospital number
-                Object.keys(hospitalNumberPages).forEach(hn => {
-                    hospitalNumberPages[hn].sort((a, b) => a - b);
-                });
-                
-                // Create display
-                pagesDisplay = Object.entries(hospitalNumberPages).map(([hospitalNumber, pages]) => 
-                    `<div class="page-item"><strong>Hospital #${hospitalNumber}</strong>: Pages ${pages.join(', ')}</div>`
-                ).join('');
-            } else {
-                pagesDisplay = '<div class="page-item">No hospital numbers found</div>';
-            }
-            
-            resultCard.innerHTML = `
-                <div class="result-header">
-                    <div class="result-filename">${result.filename}</div>
-                    <div class="result-status ${statusClass}">${statusText}</div>
-                </div>
-                <div class="result-details">
-                    <div class="detail-item">
-                        <div class="detail-label">Total Pages Analyzed</div>
-                        <div class="detail-value">${analysis.totalPagesAnalyzed || 'Unknown'}</div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">Unique Hospital Numbers</div>
-                        <div class="detail-value">${analysis.uniqueHospitalNumbers ? analysis.uniqueHospitalNumbers.join(', ') : 'None'}</div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">Multiple Patients</div>
-                        <div class="detail-value ${hasMultiplePatients ? 'true' : 'false'}">
-                            ${hasMultiplePatients ? 'Yes' : 'No'}
-                        </div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">Total Hospital Numbers Found</div>
-                        <div class="detail-value">${analysis.uniqueHospitalNumbers ? analysis.uniqueHospitalNumbers.length : 0}</div>
-                    </div>
-                </div>
-                <div class="pages-list">
-                    <h4>Pages with Hospital Numbers</h4>
-                    ${pagesDisplay}
-                </div>
-                ${hasIssues ? `
-                    <div class="issues-list">
-                        <h4>Issues Found</h4>
-                        ${analysis.issues.map(issue => `
-                            <div class="issue-item">${issue}</div>
-                        `).join('')}
-                    </div>
-                ` : ''}
-            `;
-        } else {
-            // Old format - backward compatibility
-            const hasIssues = analysis.issues && analysis.issues.length > 0;
-            const isPass = analysis.filenameMatch && analysis.singlePatient && analysis.onePatientOnly;
-            const statusClass = isPass ? 'pass' : hasIssues ? 'fail' : 'warning';
-            const statusText = isPass ? 'Pass' : hasIssues ? 'Fail' : 'Warning';
-            
-            resultCard.innerHTML = `
-                <div class="result-header">
-                    <div class="result-filename">${result.filename}</div>
-                    <div class="result-status ${statusClass}">${statusText}</div>
-                </div>
-                <div class="result-details">
-                    <div class="detail-item">
-                        <div class="detail-label">Patient Name</div>
-                        <div class="detail-value">${analysis.patientName || 'Not found'}</div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">Filename Match</div>
-                        <div class="detail-value ${analysis.filenameMatch ? 'true' : 'false'}">
-                            ${analysis.filenameMatch ? 'Yes' : 'No'}
-                        </div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">Single Patient</div>
-                        <div class="detail-value ${analysis.singlePatient ? 'true' : 'false'}">
-                            ${analysis.singlePatient ? 'Yes' : 'No'}
-                        </div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">One Patient Only</div>
-                        <div class="detail-value ${analysis.onePatientOnly ? 'true' : 'false'}">
-                            ${analysis.onePatientOnly ? 'Yes' : 'No'}
-                        </div>
-                    </div>
-                    <div class="detail-item">
-                        <div class="detail-label">Confidence</div>
-                        <div class="detail-value">${((analysis.confidence || 0) * 100).toFixed(1)}%</div>
-                    </div>
-                </div>
-                ${hasIssues ? `
-                    <div class="issues-list">
-                        <h4>Issues Found</h4>
-                        ${analysis.issues.map(issue => `
-                            <div class="issue-item">${issue}</div>
-                        `).join('')}
-                    </div>
-                ` : ''}
-            `;
-        }
-        
-        resultsDetails.appendChild(resultCard);
+    const remove = el('button', 'btn btn-secondary', 'Remove');
+    remove.type = 'button';
+    remove.addEventListener('click', () => {
+      selectedFiles.splice(index, 1);
+      updateFileList();
+      if (!selectedFiles.length) {
+        selectedFilesDiv.style.display = 'none';
+        fileUploadArea.style.display = 'block';
+      }
     });
-};
+    item.append(info, remove);
+    fileList.appendChild(item);
+  });
+}
 
-// Drag and drop handlers
-const handleDragOver = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    fileUploadArea.classList.add('drag-over');
-};
+async function handleFileSelection() {
+  try {
+    const files = await window.electronAPI.selectFiles();
+    addFiles(files || []);
+  } catch (error) {
+    showNotification(`Could not select files: ${error.message}`, 'error');
+  }
+}
 
-const handleDragEnter = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    fileUploadArea.classList.add('drag-over');
-};
-
-const handleDragLeave = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    fileUploadArea.classList.remove('drag-over');
-};
-
-const handleFileDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    fileUploadArea.classList.remove('drag-over');
-    
-    const files = Array.from(e.dataTransfer.files);
-    
-    if (files.length > 0) {
-        // For drag and drop, we'll add the files to the selection
-        // and show the file list instead of starting analysis immediately
-        showNotification(`Dropped ${files.length} file(s). Added to selection.`, 'success');
-        
-        // Add dropped files to selection
-        addDroppedFilesToSelection(files);
-    }
-};
-
-// Status polling
-const startStatusPolling = () => {
-    setInterval(updateStatusIndicators, 5000); // Poll every 5 seconds
-};
-
-// Update status indicators
-const updateStatusIndicators = async () => {
+async function handleDrop(event) {
+  event.preventDefault();
+  fileUploadArea.classList.remove('dragover');
+  const dropped = [];
+  for (const file of Array.from(event.dataTransfer.files || [])) {
     try {
-        const status = await window.electronAPI.getBackendStatus();
-        
-        // Update backend status
-        backendStatus.textContent = status.status === 'running' ? 'Connected' : 'Disconnected';
-        backendStatus.className = `status-badge ${status.status === 'running' ? 'connected' : 'disconnected'}`;
-        
-        // Update Ollama status
-        ollamaStatus.textContent = status.ollama === 'connected' ? 'Connected' : 'Disconnected';
-        ollamaStatus.className = `status-badge ${status.ollama === 'connected' ? 'connected' : 'disconnected'}`;
-        
-    } catch (error) {
-        console.error('Status update error:', error);
-        backendStatus.textContent = 'Error';
-        backendStatus.className = 'status-badge disconnected';
-        ollamaStatus.textContent = 'Error';
-        ollamaStatus.className = 'status-badge disconnected';
+      const filePath = window.electronAPI.getPathForFile(file);
+      dropped.push({ path: filePath, name: file.name, size: file.size });
+    } catch (_) {
+      showNotification(`Could not access ${file.name}. Use Browse Files instead.`, 'warning');
     }
-};
+  }
+  addFiles(dropped);
+}
 
-// Loading overlay
-const showLoading = (show) => {
-    loadingOverlay.style.display = show ? 'flex' : 'none';
-};
+async function analyzeSelectedFiles() {
+  if (!selectedFiles.length) {
+    showNotification('Select at least one PDF file.', 'warning');
+    return;
+  }
 
-// Utility functions
-const formatFileSize = (bytes) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-};
+  showLoading(true);
+  try {
+    const response = await window.electronAPI.analyzeFiles(selectedFiles.map(file => file.path));
+    analysisResults = Array.isArray(response?.results) ? response.results : [];
+    displayResults();
+    showNotification(`Analysis completed for ${analysisResults.length} file(s).`, 'success');
+  } catch (error) {
+    showNotification(`Analysis failed: ${error.message}`, 'error');
+  } finally {
+    showLoading(false);
+  }
+}
 
-// Notification system
-const showNotification = (message, type = 'info') => {
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.className = `notification notification-${type}`;
-    notification.innerHTML = `
-        <div class="notification-content">
-            <i class="fas fa-${getNotificationIcon(type)}"></i>
-            <span>${message}</span>
-        </div>
-    `;
-    
-    // Add styles
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background: ${getNotificationColor(type)};
-        color: white;
-        padding: 1rem 1.5rem;
-        border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        z-index: 1001;
-        transform: translateX(100%);
-        transition: transform 0.3s ease;
-        max-width: 400px;
-    `;
-    
-    document.body.appendChild(notification);
-    
-    // Animate in
-    setTimeout(() => {
-        notification.style.transform = 'translateX(0)';
-    }, 100);
-    
-    // Remove after 5 seconds
-    setTimeout(() => {
-        notification.style.transform = 'translateX(100%)';
-        setTimeout(() => {
-            document.body.removeChild(notification);
-        }, 300);
-    }, 5000);
-};
+function createStat(label, value) {
+  const card = el('div', 'stat-card');
+  card.append(el('div', 'stat-number', value), el('div', 'stat-label', label));
+  return card;
+}
 
-const getNotificationIcon = (type) => {
-    switch (type) {
-        case 'success': return 'check-circle';
-        case 'error': return 'exclamation-circle';
-        case 'warning': return 'exclamation-triangle';
-        default: return 'info-circle';
-    }
-};
+function displayResults() {
+  resultsSummary.replaceChildren();
+  resultsDetails.replaceChildren();
 
-const getNotificationColor = (type) => {
-    switch (type) {
-        case 'success': return '#38a169';
-        case 'error': return '#e53e3e';
-        case 'warning': return '#d69e2e';
-        default: return '#3182ce';
-    }
-};
+  const safeFiles = analysisResults.filter(result => result.analysis?.safetyAssessment?.safeForUse).length;
+  const issues = analysisResults.reduce((sum, result) => sum + (result.analysis?.summaryTable?.length || 0), 0);
+  const summary = el('div', 'summary-stats');
+  summary.append(
+    createStat('Total Files', analysisResults.length),
+    createStat('Safe for Use', safeFiles),
+    createStat('Needs Review', analysisResults.length - safeFiles),
+    createStat('Total Issues', issues)
+  );
+  resultsSummary.appendChild(summary);
 
-// Privacy toggle function
-const togglePrivacy = (button, type) => {
-    // Handle both old structure (.info-value) and new structure (.privacy-protected)
-    const privacyElement = button.closest('.info-value') || button.closest('.privacy-protected');
-    const privacyMask = privacyElement.querySelector('.privacy-mask');
-    const icon = button.querySelector('i');
-    const actualValue = privacyElement.getAttribute('data-value');
-    const existingValueSpan = privacyElement.querySelector('.actual-value');
-    
-    if (privacyElement.classList.contains('revealed')) {
-        // Hide the value
-        privacyElement.classList.remove('revealed');
-        privacyMask.style.display = 'inline';
-        privacyMask.textContent = type === 'name' || type === 'patient_name' ? '••••••••••' : '••••••';
-        icon.className = 'fas fa-eye';
-        button.setAttribute('title', 'Click to reveal');
-        
-        // Remove the actual value span if it exists
-        if (existingValueSpan) {
-            existingValueSpan.remove();
-        }
+  analysisResults.forEach(result => resultsDetails.appendChild(createResultCard(result)));
+  resultsSection.style.display = 'block';
+  resultsSection.scrollIntoView({ behavior: 'smooth' });
+}
+
+function createDetail(label, value, extraClass = '') {
+  const item = el('div', 'detail-item');
+  item.append(el('div', 'detail-label', label), el('div', `detail-value ${extraClass}`.trim(), value));
+  return item;
+}
+
+function createMaskedFinding(label, value, masked) {
+  const row = el('div', 'finding-item positive privacy-protected');
+  const labelNode = el('span', 'finding-label', `${label}: `);
+  const valueNode = el('span', 'privacy-mask', masked);
+  const button = el('button', 'privacy-toggle', 'Show');
+  button.type = 'button';
+  let revealed = false;
+  button.addEventListener('click', () => {
+    revealed = !revealed;
+    valueNode.textContent = revealed ? value : masked;
+    button.textContent = revealed ? 'Hide' : 'Show';
+  });
+  row.append(labelNode, valueNode, button);
+  return row;
+}
+
+function createIssuesTable(issues) {
+  const section = el('div', 'summary-table');
+  section.appendChild(el('h4', '', 'Summary of Issues'));
+  const table = el('table');
+  const head = el('thead');
+  const headRow = el('tr');
+  ['Issue Type', 'Count', 'Pages Affected', 'Description'].forEach(title => headRow.appendChild(el('th', '', title)));
+  head.appendChild(headRow);
+  table.appendChild(head);
+
+  const body = el('tbody');
+  for (const issue of issues) {
+    const row = el('tr');
+    row.append(
+      el('td', '', issue.issueType || ''),
+      el('td', '', issue.count ?? ''),
+      el('td', '', issue.pagesAffected || ''),
+      el('td', '', issue.description || '')
+    );
+    body.appendChild(row);
+  }
+  table.appendChild(body);
+  section.appendChild(table);
+  return section;
+}
+
+function createRecommendations(analysis) {
+  const recommendations = analysis.recommendations || {};
+  const groups = [
+    ['Manual review', recommendations.manualReview],
+    ['Rescan', recommendations.rescanning],
+    ['Verify', recommendations.verification],
+    ['Correct', recommendations.corrections]
+  ];
+  const populated = groups.filter(([, items]) => Array.isArray(items) && items.length);
+  if (!populated.length) return null;
+
+  const section = el('div', 'recommendations-section');
+  section.appendChild(el('h4', '', 'Recommendations'));
+  for (const [label, items] of populated) {
+    for (const item of items) section.appendChild(el('div', 'recommendation-item', `${label}: ${item}`));
+  }
+  return section;
+}
+
+function createResultCard(result) {
+  const analysis = result.analysis || {};
+  const safety = analysis.safetyAssessment || {};
+  const coverage = analysis.identifierCoverage || {};
+  const card = el('div', 'result-card');
+
+  const header = el('div', 'result-header');
+  header.append(
+    el('div', 'result-filename', analysis.fileInformation?.fileName || result.filename || 'Unknown'),
+    el('div', `result-status ${safety.safeForUse ? 'pass' : 'fail'}`, safety.safeForUse ? 'Safe for Use' : 'Needs Review')
+  );
+  card.appendChild(header);
+
+  const details = el('div', 'result-details');
+  details.append(
+    createDetail('Total Pages', analysis.fileInformation?.totalPages ?? 0),
+    createDetail('Identifier Coverage', Number.isFinite(coverage.coveragePercentage) ? `${coverage.coveragePercentage.toFixed(1)}%` : '0.0%'),
+    createDetail('Pages Failed', coverage.pagesFailed ?? 0, coverage.pagesFailed ? 'false' : 'true'),
+    createDetail('Risk Level', safety.riskLevel || 'Unknown'),
+    createDetail('Compliance Status', analysis.complianceStatus || 'Unknown')
+  );
+  card.appendChild(details);
+
+  const reason = el('div', 'finding-section');
+  reason.append(el('h5', '', 'Safety Assessment'), el('div', 'finding-item', safety.reason || 'No assessment reason available.'));
+  card.appendChild(reason);
+
+  const identifiers = el('div', 'finding-section');
+  identifiers.appendChild(el('h5', '', 'Patient Identifiers'));
+  const names = analysis.patientIdentifiers?.names || [];
+  const hospitalNumbers = analysis.patientIdentifiers?.hospitalNumbers || [];
+  if (!names.length && !hospitalNumbers.length) {
+    identifiers.appendChild(el('div', 'finding-item', 'No patient identifiers were reliably extracted.'));
+  }
+  names.forEach((name, index) => identifiers.appendChild(createMaskedFinding(`Patient name${names.length > 1 ? ` ${index + 1}` : ''}`, name, '••••••••••')));
+  hospitalNumbers.forEach((id, index) => identifiers.appendChild(createMaskedFinding(`Hospital ID${hospitalNumbers.length > 1 ? ` ${index + 1}` : ''}`, id, '••••••')));
+  card.appendChild(identifiers);
+
+  const issues = analysis.summaryTable || [];
+  if (issues.length) card.appendChild(createIssuesTable(issues));
+
+  const recommendations = createRecommendations(analysis);
+  if (recommendations) card.appendChild(recommendations);
+
+  if (Array.isArray(safety.immediateActions) && safety.immediateActions.length) {
+    const actions = el('div', 'immediate-actions');
+    actions.appendChild(el('h4', '', 'Immediate Actions Required'));
+    safety.immediateActions.forEach(action => actions.appendChild(el('div', 'action-item', action)));
+    card.appendChild(actions);
+  }
+
+  return card;
+}
+
+async function exportToExcel() {
+  if (!analysisResults.length) {
+    showNotification('There are no results to export.', 'warning');
+    return;
+  }
+  const confirmed = window.confirm('Excel export includes patient names and hospital numbers in clear text. Continue?');
+  if (!confirmed) return;
+
+  try {
+    const result = await window.electronAPI.exportToExcel(analysisResults);
+    if (result.success) showNotification('Excel export completed.', 'success');
+    else if (!result.canceled) showNotification(`Export failed: ${result.error || 'Unknown error'}`, 'error');
+  } catch (error) {
+    showNotification(`Export failed: ${error.message}`, 'error');
+  }
+}
+
+function setStatus(node, text, state) {
+  node.textContent = text;
+  node.className = `status-badge ${state}`;
+}
+
+async function updateStatusIndicators() {
+  try {
+    const status = await window.electronAPI.getBackendStatus();
+    setStatus(backendStatus, status.status === 'running' ? 'Ready' : 'Error', status.status === 'running' ? 'connected' : 'error');
+    if (status.ollama !== 'connected') {
+      setStatus(ollamaStatus, 'Disconnected', 'error');
+    } else if (!status.models?.ocr || !status.models?.analysis) {
+      setStatus(ollamaStatus, 'Models Missing', 'warning');
     } else {
-        // Show the value
-        privacyElement.classList.add('revealed');
-        privacyMask.style.display = 'none';
-        icon.className = 'fas fa-eye-slash';
-        button.setAttribute('title', 'Click to hide');
-        
-        // Show the actual value (only if it doesn't already exist)
-        if (!existingValueSpan) {
-            const valueSpan = document.createElement('span');
-            valueSpan.className = 'actual-value';
-            valueSpan.textContent = actualValue;
-            privacyElement.appendChild(valueSpan);
-        }
+      setStatus(ollamaStatus, 'Connected', 'connected');
     }
-}; 
+  } catch (_) {
+    setStatus(backendStatus, 'Error', 'error');
+    setStatus(ollamaStatus, 'Disconnected', 'error');
+  }
+}
 
-// Excel export functionality
-const exportToExcel = async () => {
-    if (!analysisResults || analysisResults.length === 0) {
-        showNotification('No analysis results to export', 'warning');
-        return;
-    }
-    
-    try {
-        const exportButton = document.getElementById('export-excel-btn');
-        const originalText = exportButton.innerHTML;
-        
-        // Show loading state
-        exportButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
-        exportButton.disabled = true;
-        
-        const result = await window.electronAPI.exportToExcel(analysisResults);
-        
-        if (result.success) {
-            showNotification(`Excel file saved successfully to: ${result.filePath}`, 'success');
-        } else if (result.canceled) {
-            showNotification('Export cancelled', 'info');
-        } else {
-            throw new Error(result.error || 'Export failed');
-        }
-    } catch (error) {
-        console.error('Export error:', error);
-        showNotification('Export failed: ' + error.message, 'error');
-    } finally {
-        // Restore button state
-        const exportButton = document.getElementById('export-excel-btn');
-        exportButton.innerHTML = originalText;
-        exportButton.disabled = false;
-    }
-};
+selectFilesBtn.addEventListener('click', handleFileSelection);
+clearFilesBtn.addEventListener('click', () => {
+  selectedFiles = [];
+  updateFileList();
+  selectedFilesDiv.style.display = 'none';
+  fileUploadArea.style.display = 'block';
+});
+analyzeFilesBtn.addEventListener('click', analyzeSelectedFiles);
+exportButton.addEventListener('click', exportToExcel);
+fileUploadArea.addEventListener('dragover', event => {
+  event.preventDefault();
+  fileUploadArea.classList.add('dragover');
+});
+fileUploadArea.addEventListener('dragleave', () => fileUploadArea.classList.remove('dragover'));
+fileUploadArea.addEventListener('drop', handleDrop);
+fileUploadArea.addEventListener('click', event => {
+  if (event.target === fileUploadArea) handleFileSelection();
+});
 
- 
+document.addEventListener('DOMContentLoaded', () => {
+  updateStatusIndicators();
+  setInterval(updateStatusIndicators, 10000);
+});
