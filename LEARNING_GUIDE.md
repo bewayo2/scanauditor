@@ -17,6 +17,12 @@ The CLI can analyze text examples and ask you to correct:
 
 Corrections are stored locally in `learning_data.json`. That file is excluded from Git because it may contain patient information.
 
+## Models
+
+The learning tool uses the same centralized configuration as the production application. By default, structured extraction uses `qwen3:14b`; OCR/image work in the main application uses `qwen3-vl:8b-instruct`.
+
+If you set `SCANAUDITOR_VISION_MODEL` or `SCANAUDITOR_TEXT_MODEL`, the learning workflow follows the same overrides.
+
 ## How the main application uses corrections
 
 `comprehensive_analyzer.js` reads the five most recent corrected examples from `learning_data.json` and includes them as extraction examples when analyzing OCR text. The final document safety decision remains deterministic JavaScript logic; feedback examples cannot directly mark a document safe.

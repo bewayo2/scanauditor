@@ -4,7 +4,8 @@ const { pathToFileURL } = require('url');
 const fs = require('fs-extra');
 const axios = require('axios');
 const XLSX = require('xlsx');
-const ComprehensiveAnalyzer = require('./comprehensive_analyzer');
+const ConfiguredAnalyzer = require('./configured_analyzer');
+const { ACTIVE_MODELS, isModelInstalled } = require('./model_config');
 
 let mainWindow;
 
@@ -36,17 +37,31 @@ function createWindow() {
 async function getOllamaStatus() {
   try {
     const response = await axios.get('http://127.0.0.1:11434/api/tags', { timeout: 2500 });
-    const names = (response.data.models || []).map(model => model.name);
+    const names = (response.data.models || [])
+      .flatMap(model => [model.name, model.model])
+      .filter(Boolean);
     return {
       status: 'running',
       ollama: 'connected',
       models: {
-        ocr: names.some(name => name.startsWith('qwen2.5vl:7b')),
-        analysis: names.some(name => name.startsWith('gemma3n:latest'))
+        ocr: isModelInstalled(names, ACTIVE_MODELS.ocr),
+        analysis: isModelInstalled(names, ACTIVE_MODELS.text)
+      },
+      configuredModels: {
+        vision: ACTIVE_MODELS.vision,
+        text: ACTIVE_MODELS.text
       }
     };
   } catch (error) {
-    return { status: 'running', ollama: 'disconnected', models: { ocr: false, analysis: false } };
+    return {
+      status: 'running',
+      ollama: 'disconnected',
+      models: { ocr: false, analysis: false },
+      configuredModels: {
+        vision: ACTIVE_MODELS.vision,
+        text: ACTIVE_MODELS.text
+      }
+    };
   }
 }
 
@@ -174,7 +189,7 @@ ipcMain.handle('analyze-files', async (_event, filePaths) => {
   if (!Array.isArray(filePaths) || filePaths.length === 0) throw new Error('No files selected.');
   if (filePaths.length > 25) throw new Error('Analyze no more than 25 files at one time.');
 
-  const analyzer = new ComprehensiveAnalyzer();
+  const analyzer = new ConfiguredAnalyzer();
   const results = [];
 
   for (const requestedPath of filePaths) {

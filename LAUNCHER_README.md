@@ -6,107 +6,81 @@ This folder contains launcher scripts that allow you to run ScanAuditor without 
 
 ### Option 1: Windows Batch File (Recommended)
 1. **Double-click** `run_scan_auditor.bat`
-2. The script will automatically:
-   - Check if Node.js and Python are installed
-   - Verify Ollama is running
-   - Install dependencies if needed
-   - Launch the application
+2. The script checks Node.js and Python, installs dependencies if needed, prepares the Python environment, and launches the application.
 
 ### Option 2: PowerShell Script
 1. **Right-click** `run_scan_auditor.ps1`
-2. Select **"Run with PowerShell"**
-3. The script will perform the same checks and launch the app
+2. Select **Run with PowerShell**.
+3. The script performs the same local environment checks and launches the app.
 
 ## Prerequisites
 
-Before running the launcher scripts, make sure you have:
+Before running ScanAuditor, make sure you have:
 
 ### 1. Node.js
-- Download from: https://nodejs.org/
-- Install the LTS version
-- Verify installation: Open Command Prompt and type `node --version`
+- Install the current LTS release from https://nodejs.org/
+- Verify with `node --version`
 
 ### 2. Python
-- Download from: https://python.org/
-- Install Python 3.11 or later
-- Verify installation: Open Command Prompt and type `python --version`
+- Install Python 3.10 or later from https://python.org/
+- Verify with `python --version`
 
 ### 3. Ollama
-- Download from: https://ollama.ai/
-- Install and start Ollama
-- Pull required models:
-  ```bash
-  ollama pull qwen2.5vl:7b
-  ollama pull gemma3n:latest
-  ```
-
-## What the Launcher Does
-
-The launcher scripts automatically:
-
-1. **Environment Check**: Verifies Node.js and Python are installed
-2. **Ollama Check**: Confirms Ollama is running (required for AI processing)
-3. **Dependency Installation**: Installs Node.js packages if needed
-4. **Python Environment**: Creates and configures Python virtual environment
-5. **Application Launch**: Starts ScanAuditor in a new window
-
-## Troubleshooting
-
-### "Node.js not found"
-- Install Node.js from https://nodejs.org/
-- Restart your computer after installation
-
-### "Python not found"
-- Install Python from https://python.org/
-- Make sure to check "Add Python to PATH" during installation
-
-### "Ollama not running"
-- Start Ollama application
-- Or run `ollama serve` in Command Prompt
-
-### "Dependencies failed to install"
-- Check your internet connection
-- Try running the script as Administrator
-- Delete `node_modules` folder and try again
-
-### "Python dependencies failed"
-- Install Visual Studio Build Tools (required for some packages)
-- Or try running: `pip install --upgrade pip`
-
-## Manual Launch (Advanced Users)
-
-If you prefer to launch manually:
+- Install Ollama 0.12.7 or later.
+- Start Ollama.
+- Pull the balanced default models:
 
 ```bash
-# Install dependencies
+ollama pull qwen3-vl:8b-instruct
+ollama pull qwen3:14b
+```
+
+`qwen3-vl:8b-instruct` is used for OCR and visual page-quality checks. `qwen3:14b` is used for structured patient-name, hospital-number, and date extraction.
+
+For first-time setup, running `setup.bat` or `setup.ps1` is preferred because those scripts also pull the required models.
+
+## Manual Launch
+
+```bash
 npm install
-
-# Create Python environment
-python -m venv paddleocr_env
-paddleocr_env\Scripts\activate
-pip install -r requirements.txt
-deactivate
-
-# Start the application
+setup_python_env.bat
 npm start
 ```
 
-## Support
+PowerShell users can use `setup_python_env.ps1` instead.
 
-If you encounter issues:
-1. Check the console output for error messages
-2. Ensure all prerequisites are installed
-3. Try running the script as Administrator
-4. Check that Ollama is running and models are downloaded
+## Alternate models
+
+Production model selection is centralized and can be overridden for benchmarking:
+
+```powershell
+$env:SCANAUDITOR_VISION_MODEL="another-vision-model"
+$env:SCANAUDITOR_TEXT_MODEL="another-text-model"
+npm start
+```
+
+The configured vision model is reused for both OCR and image analysis.
+
+## Troubleshooting
+
+- **Node.js not found**: install Node.js and reopen the terminal.
+- **Python not found**: install Python and ensure it is on PATH.
+- **Ollama not running**: start Ollama before launching ScanAuditor.
+- **Models Missing**: run `setup.bat`/`setup.ps1` or pull the configured models manually.
+- **Qwen3-VL cannot be loaded**: update Ollama to 0.12.7 or later.
+- **Python dependency failure**: run `setup_python_env.bat` or `setup_python_env.ps1` again.
 
 ## File Structure
 
-```
+```text
 ScanAuditor/
-├── run_scan_auditor.bat          # Windows batch launcher
-├── run_scan_auditor.ps1          # PowerShell launcher
-├── LAUNCHER_README.md            # This file
-├── package.json                  # Node.js dependencies
-├── requirements.txt              # Python dependencies
-└── ... (other application files)
+├── run_scan_auditor.bat
+├── run_scan_auditor.ps1
+├── setup.bat
+├── setup.ps1
+├── model_config.js
+├── configured_analyzer.js
+├── package.json
+├── requirements.txt
+└── ...
 ```

@@ -1,6 +1,6 @@
 const fs = require('fs-extra');
 const path = require('path');
-const ComprehensiveAnalyzer = require('./comprehensive_analyzer');
+const ConfiguredAnalyzer = require('./configured_analyzer');
 
 class InteractiveLearning {
   constructor() {
@@ -14,7 +14,7 @@ class InteractiveLearning {
     } catch (_) {
       this.feedbackHistory = [];
     }
-    this.analyzer = new ComprehensiveAnalyzer({ learningDataPath: this.learningDataPath });
+    this.analyzer = new ConfiguredAnalyzer({ learningDataPath: this.learningDataPath });
   }
 
   async saveLearningData() {
