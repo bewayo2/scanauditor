@@ -16,7 +16,7 @@ or:
 .\setup_python_env.ps1
 ```
 
-Both scripts create `paddleocr_env`, which is the environment used by `comprehensive_analyzer.js`.
+Both scripts create `paddleocr_env`, which is the environment used by the PDF conversion path.
 
 ## Poppler
 
@@ -34,7 +34,8 @@ This makes the application portable; there is no hard-coded `C:\Repos\...` depen
 - Every PDF page is converted and audited.
 - Pages are converted one at a time to reduce peak memory use.
 - Temporary PNG files are placed under `temp_images/` and deleted after each analysis.
-- OCR is performed locally with `qwen2.5vl:7b` through Ollama.
+- OCR is performed locally with the configured vision model, which defaults to `qwen3-vl:8b-instruct`.
+- The same vision model performs scan-quality checks after OCR/identifier extraction.
 
 ## Troubleshooting
 
@@ -47,3 +48,5 @@ If PDF conversion fails:
 2. Confirm Poppler is installed or set `POPPLER_PATH` to its `bin` directory.
 3. Run `pdfinfo -v` or `pdftoppm -h` from a terminal if Poppler is on the system `PATH`.
 4. Run ScanAuditor again and review the non-PHI error message in the console.
+
+If OCR fails while PDF conversion succeeds, verify Ollama is current and that the configured vision model is installed. The default Qwen3-VL model requires Ollama 0.12.7 or later.
