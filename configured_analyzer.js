@@ -14,6 +14,12 @@ class ConfiguredAnalyzer extends ScanFidelityAnalyzer {
       imageModel: rest.imageModel || models.image
     });
   }
+
+  log(event, details = {}) {
+    const safeDetails = { ...details };
+    delete safeDetails.fileName;
+    console.log(`[ScanAuditor] ${event}`, safeDetails);
+  }
 }
 
 module.exports = ConfiguredAnalyzer;
