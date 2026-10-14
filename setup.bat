@@ -17,6 +17,12 @@ python --version >nul 2>&1 || (
 npm install || exit /b 1
 call setup_python_env.bat || exit /b 1
 
+if exist "poppler-windows.zip" if not exist "poppler-windows" (
+  echo Extracting bundled Poppler...
+  powershell -NoProfile -Command "Expand-Archive -Path 'poppler-windows.zip' -DestinationPath 'poppler-windows' -Force"
+  if errorlevel 1 exit /b 1
+)
+
 ollama --version >nul 2>&1 || (
   echo ERROR: Ollama is not installed or not in PATH.
   echo Install Ollama, then run:
