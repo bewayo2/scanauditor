@@ -1,3 +1,5 @@
+'use strict';
+
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
@@ -6,6 +8,8 @@ const axios = require('axios');
 const XLSX = require('xlsx');
 const ConfiguredAnalyzer = require('./configured_analyzer');
 const { ACTIVE_MODELS, isModelInstalled } = require('./model_config');
+const { AUDIT_CONFIG } = require('./audit_config');
+const { appendAuditRecord } = require('./audit_logger');
 
 let mainWindow;
 
@@ -37,9 +41,7 @@ function createWindow() {
 async function getOllamaStatus() {
   try {
     const response = await axios.get('http://127.0.0.1:11434/api/tags', { timeout: 2500 });
-    const names = (response.data.models || [])
-      .flatMap(model => [model.name, model.model])
-      .filter(Boolean);
+    const names = (response.data.models || []).flatMap(model => [model.name, model.model]).filter(Boolean);
     return {
       status: 'running',
       ollama: 'connected',
@@ -47,41 +49,31 @@ async function getOllamaStatus() {
         ocr: isModelInstalled(names, ACTIVE_MODELS.ocr),
         analysis: isModelInstalled(names, ACTIVE_MODELS.text)
       },
-      configuredModels: {
-        vision: ACTIVE_MODELS.vision,
-        text: ACTIVE_MODELS.text
-      }
+      configuredModels: { vision: ACTIVE_MODELS.vision, text: ACTIVE_MODELS.text }
     };
-  } catch (error) {
+  } catch (_) {
     return {
       status: 'running',
       ollama: 'disconnected',
       models: { ocr: false, analysis: false },
-      configuredModels: {
-        vision: ACTIVE_MODELS.vision,
-        text: ACTIVE_MODELS.text
-      }
+      configuredModels: { vision: ACTIVE_MODELS.vision, text: ACTIVE_MODELS.text }
     };
   }
 }
 
 function failureResult(filePath, error) {
   const fileName = path.basename(filePath || 'Unknown.pdf');
+  const analysisDate = new Date().toISOString();
+  const finding = {
+    code: 'ANALYSIS_FAILED',
+    message: 'Automated QA could not complete this document. Resolve the analysis error and run the audit again.',
+    pages: []
+  };
   return {
     filename: fileName,
     analysis: {
-      fileInformation: {
-        fileName,
-        scanDate: new Date().toISOString().split('T')[0],
-        totalPages: 0
-      },
-      summaryTable: [{
-        issueType: 'Analysis Failed',
-        count: 1,
-        pagesAffected: 'Unknown',
-        description: error.message
-      }],
-      detailedFindings: {},
+      fileInformation: { fileName, analysisDate, totalPages: 0 },
+      summaryTable: [{ issueType: 'ANALYSIS FAILED', count: 1, pagesAffected: 'Document', description: error.message }],
       patientIdentifiers: { names: [], hospitalNumbers: [] },
       identifierCoverage: {
         totalPages: 0,
@@ -90,25 +82,43 @@ function failureResult(filePath, error) {
         pagesWithIdentifiers: 0,
         pagesWithoutIdentifiers: 0,
         coveragePercentage: 0,
+        complete: false
+      },
+      pageLinkage: {
+        totalPages: 0,
+        identifiedPages: [],
+        continuationPages: [],
+        unresolvedPages: [],
+        failedPages: [],
+        resolvedPages: 0,
+        resolvedPercentage: 0
+      },
+      imageAnalysis: {
         complete: false,
-        isUnsafe: true
+        exactDuplicateGroups: [],
+        possibleDuplicateGroups: []
       },
       recommendations: {
-        manualReview: ['Resolve the analysis error and run the audit again.'],
-        rescanning: [],
-        verification: [],
-        corrections: []
+        manualReview: ['Resolve the analysis error and run the automated QA again.'],
+        compareWithSource: [],
+        rescanning: []
       },
-      safetyAssessment: {
-        safeForUse: false,
-        reason: 'Analysis failed. The document has not been cleared for use.',
-        riskLevel: 'high',
-        immediateActions: ['Manual review required.']
+      qaAssessment: {
+        status: 'analysis-failed',
+        reason: 'Automated QA could not complete this document.',
+        findings: [finding]
       },
-      complianceStatus: 'needs-review',
-      priorityIssues: ['Analysis failed.']
+      analysisMetadata: {
+        analysisDate,
+        dpi: AUDIT_CONFIG.dpi,
+        models: { ocr: ACTIVE_MODELS.ocr, text: ACTIVE_MODELS.text, image: ACTIVE_MODELS.image },
+        fileSha256: null,
+        durationMs: null,
+        appVersion: app.getVersion()
+      },
+      priorityIssues: [finding.message]
     },
-    timestamp: new Date().toISOString()
+    timestamp: analysisDate
   };
 }
 
@@ -119,34 +129,51 @@ function excelSafe(value) {
   return /^[=+\-@]/.test(text) ? `'${text}` : text;
 }
 
+function formatGroups(groups) {
+  if (!Array.isArray(groups)) return '';
+  return groups.map(group => Array.isArray(group) ? group.join(' and ') : '').filter(Boolean).join('; ');
+}
+
 function exportToExcel(analysisResults) {
   const rows = analysisResults.map(result => {
     const analysis = result.analysis || {};
     const coverage = analysis.identifierCoverage || {};
+    const linkage = analysis.pageLinkage || {};
+    const qa = analysis.qaAssessment || {};
+    const images = analysis.imageAnalysis || {};
     return {
       'File Name': excelSafe(analysis.fileInformation?.fileName || result.filename || 'Unknown'),
-      'Scan Date': excelSafe(analysis.fileInformation?.scanDate || ''),
+      'Analysis Date': excelSafe(analysis.fileInformation?.analysisDate || analysis.analysisMetadata?.analysisDate || ''),
       'Total Pages': analysis.fileInformation?.totalPages || 0,
-      'Safe for Use': analysis.safetyAssessment?.safeForUse ? 'Yes' : 'No',
-      'Risk Level': excelSafe(analysis.safetyAssessment?.riskLevel || 'Unknown'),
-      'Compliance Status': excelSafe(analysis.complianceStatus || 'Unknown'),
-      'Reason': excelSafe(analysis.safetyAssessment?.reason || ''),
+      'Automated QA Status': excelSafe(qa.status || 'analysis-failed'),
+      'QA Reason': excelSafe(qa.reason || ''),
       'Identifier Coverage': Number.isFinite(coverage.coveragePercentage) ? `${coverage.coveragePercentage.toFixed(1)}%` : '0.0%',
+      'Continuation Pages': excelSafe(linkage.continuationPages || []),
+      'Unresolved Pages': excelSafe(linkage.unresolvedPages || []),
       'Pages Failed': coverage.pagesFailed || 0,
       'Patient Names': excelSafe(analysis.patientIdentifiers?.names || []),
       'Hospital Numbers': excelSafe(analysis.patientIdentifiers?.hospitalNumbers || []),
-      'Priority Issues': excelSafe(analysis.priorityIssues || []),
-      'Immediate Actions': excelSafe(analysis.safetyAssessment?.immediateActions || []),
+      'Finding Codes': excelSafe((qa.findings || []).map(item => item.code)),
       'Issue Types': excelSafe((analysis.summaryTable || []).map(issue => issue.issueType)),
-      'Pages Affected': excelSafe((analysis.summaryTable || []).map(issue => issue.pagesAffected))
+      'Pages Affected': excelSafe((analysis.summaryTable || []).map(issue => issue.pagesAffected)),
+      'Exact Duplicate Groups': excelSafe(formatGroups(images.exactDuplicateGroups)),
+      'Possible Duplicate Groups': excelSafe(formatGroups(images.possibleDuplicateGroups))
     };
   });
 
   const workbook = XLSX.utils.book_new();
   const worksheet = XLSX.utils.json_to_sheet(rows);
   worksheet['!cols'] = Object.keys(rows[0] || {}).map(key => ({ wch: Math.max(15, Math.min(45, key.length + 8)) }));
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Analysis Results');
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Automated QA Results');
   return workbook;
+}
+
+async function writeAuditRecord(result) {
+  try {
+    await appendAuditRecord(app.getPath('userData'), result, app.getVersion());
+  } catch (error) {
+    console.error('[ScanAuditor] audit_log_failed', { message: error.message });
+  }
 }
 
 app.whenReady().then(() => {
@@ -193,6 +220,7 @@ ipcMain.handle('analyze-files', async (_event, filePaths) => {
   const results = [];
 
   for (const requestedPath of filePaths) {
+    let result;
     try {
       if (typeof requestedPath !== 'string' || path.extname(requestedPath).toLowerCase() !== '.pdf') {
         throw new Error('Only PDF files are supported.');
@@ -200,11 +228,13 @@ ipcMain.handle('analyze-files', async (_event, filePaths) => {
       const realPath = await fs.realpath(requestedPath);
       const stat = await fs.stat(realPath);
       if (!stat.isFile()) throw new Error('Selected path is not a file.');
-      results.push(await analyzer.analyzeFile({ path: realPath, originalname: path.basename(realPath) }));
+      result = await analyzer.analyzeFile({ path: realPath, originalname: path.basename(realPath) });
     } catch (error) {
-      console.error('[ScanAuditor] analysis_failed', { file: path.basename(String(requestedPath || 'Unknown')), message: error.message });
-      results.push(failureResult(requestedPath, error));
+      console.error('[ScanAuditor] analysis_failed', { message: error.message });
+      result = failureResult(requestedPath, error);
     }
+    results.push(result);
+    await writeAuditRecord(result);
   }
 
   return { results };
@@ -213,7 +243,7 @@ ipcMain.handle('analyze-files', async (_event, filePaths) => {
 ipcMain.handle('export-to-excel', async (_event, analysisResults) => {
   try {
     const result = await dialog.showSaveDialog(mainWindow, {
-      title: 'Save Analysis Results',
+      title: 'Save Automated QA Results',
       defaultPath: `ScanAuditor_Results_${new Date().toISOString().split('T')[0]}.xlsx`,
       filters: [{ name: 'Excel Files', extensions: ['xlsx'] }]
     });

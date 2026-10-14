@@ -27,7 +27,7 @@ def resolve_poppler_path():
     return None
 
 
-def convert_pdf_to_images(pdf_path, output_dir, num_pages, dpi=100):
+def convert_pdf_to_images(pdf_path, output_dir, num_pages, dpi=300):
     """Convert every requested page, one at a time, to avoid loading a large PDF into memory."""
     try:
         pdf_path = Path(pdf_path).resolve()
@@ -83,7 +83,7 @@ def main():
 
     try:
         num_pages = int(sys.argv[3])
-        dpi = int(sys.argv[4]) if len(sys.argv) > 4 else 100
+        dpi = int(sys.argv[4]) if len(sys.argv) > 4 else 300
     except ValueError:
         print(json.dumps({"success": False, "error": "num_pages and dpi must be integers"}))
         return 1

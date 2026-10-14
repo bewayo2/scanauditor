@@ -1,3 +1,5 @@
+'use strict';
+
 let selectedFiles = [];
 let analysisResults = [];
 
@@ -130,9 +132,9 @@ async function analyzeSelectedFiles() {
     const response = await window.electronAPI.analyzeFiles(selectedFiles.map(file => file.path));
     analysisResults = Array.isArray(response?.results) ? response.results : [];
     displayResults();
-    showNotification(`Analysis completed for ${analysisResults.length} file(s).`, 'success');
+    showNotification(`Automated QA completed for ${analysisResults.length} file(s).`, 'success');
   } catch (error) {
-    showNotification(`Analysis failed: ${error.message}`, 'error');
+    showNotification(`Automated QA failed: ${error.message}`, 'error');
   } finally {
     showLoading(false);
   }
@@ -144,18 +146,31 @@ function createStat(label, value) {
   return card;
 }
 
+function qaLabel(status) {
+  if (status === 'passed') return 'Automated QA Passed';
+  if (status === 'review-required') return 'Review Required';
+  return 'Analysis Failed';
+}
+
+function qaClass(status) {
+  if (status === 'passed') return 'pass';
+  if (status === 'review-required') return 'warning';
+  return 'fail';
+}
+
 function displayResults() {
   resultsSummary.replaceChildren();
   resultsDetails.replaceChildren();
 
-  const safeFiles = analysisResults.filter(result => result.analysis?.safetyAssessment?.safeForUse).length;
-  const issues = analysisResults.reduce((sum, result) => sum + (result.analysis?.summaryTable?.length || 0), 0);
+  const passed = analysisResults.filter(result => result.analysis?.qaAssessment?.status === 'passed').length;
+  const review = analysisResults.filter(result => result.analysis?.qaAssessment?.status === 'review-required').length;
+  const failed = analysisResults.filter(result => result.analysis?.qaAssessment?.status === 'analysis-failed').length;
   const summary = el('div', 'summary-stats');
   summary.append(
     createStat('Total Files', analysisResults.length),
-    createStat('Safe for Use', safeFiles),
-    createStat('Needs Review', analysisResults.length - safeFiles),
-    createStat('Total Issues', issues)
+    createStat('Automated QA Passed', passed),
+    createStat('Review Required', review),
+    createStat('Analysis Failed', failed)
   );
   resultsSummary.appendChild(summary);
 
@@ -188,11 +203,11 @@ function createMaskedFinding(label, value, masked) {
 
 function createIssuesTable(issues) {
   const section = el('div', 'summary-table');
-  section.appendChild(el('h4', '', 'Summary of Issues'));
+  section.appendChild(el('h4', '', 'Automated QA Findings'));
   const table = el('table');
   const head = el('thead');
   const headRow = el('tr');
-  ['Issue Type', 'Count', 'Pages Affected', 'Description'].forEach(title => headRow.appendChild(el('th', '', title)));
+  ['Finding', 'Count', 'Pages Affected', 'Description'].forEach(title => headRow.appendChild(el('th', '', title)));
   head.appendChild(headRow);
   table.appendChild(head);
 
@@ -216,9 +231,8 @@ function createRecommendations(analysis) {
   const recommendations = analysis.recommendations || {};
   const groups = [
     ['Manual review', recommendations.manualReview],
-    ['Rescan', recommendations.rescanning],
-    ['Verify', recommendations.verification],
-    ['Correct', recommendations.corrections]
+    ['Compare with source', recommendations.compareWithSource],
+    ['Rescan if needed', recommendations.rescanning]
   ];
   const populated = groups.filter(([, items]) => Array.isArray(items) && items.length);
   if (!populated.length) return null;
@@ -233,14 +247,15 @@ function createRecommendations(analysis) {
 
 function createResultCard(result) {
   const analysis = result.analysis || {};
-  const safety = analysis.safetyAssessment || {};
+  const qa = analysis.qaAssessment || { status: 'analysis-failed', reason: 'No QA result available.' };
   const coverage = analysis.identifierCoverage || {};
+  const linkage = analysis.pageLinkage || {};
   const card = el('div', 'result-card');
 
   const header = el('div', 'result-header');
   header.append(
     el('div', 'result-filename', analysis.fileInformation?.fileName || result.filename || 'Unknown'),
-    el('div', `result-status ${safety.safeForUse ? 'pass' : 'fail'}`, safety.safeForUse ? 'Safe for Use' : 'Needs Review')
+    el('div', `result-status ${qaClass(qa.status)}`, qaLabel(qa.status))
   );
   card.appendChild(header);
 
@@ -248,40 +263,32 @@ function createResultCard(result) {
   details.append(
     createDetail('Total Pages', analysis.fileInformation?.totalPages ?? 0),
     createDetail('Identifier Coverage', Number.isFinite(coverage.coveragePercentage) ? `${coverage.coveragePercentage.toFixed(1)}%` : '0.0%'),
-    createDetail('Pages Failed', coverage.pagesFailed ?? 0, coverage.pagesFailed ? 'false' : 'true'),
-    createDetail('Risk Level', safety.riskLevel || 'Unknown'),
-    createDetail('Compliance Status', analysis.complianceStatus || 'Unknown')
+    createDetail('Continuation Pages', Array.isArray(linkage.continuationPages) ? linkage.continuationPages.length : 0),
+    createDetail('Unresolved Pages', Array.isArray(linkage.unresolvedPages) ? linkage.unresolvedPages.length : 0),
+    createDetail('Pages Failed', coverage.pagesFailed ?? 0),
+    createDetail('QA Status', qaLabel(qa.status))
   );
   card.appendChild(details);
 
   const reason = el('div', 'finding-section');
-  reason.append(el('h5', '', 'Safety Assessment'), el('div', 'finding-item', safety.reason || 'No assessment reason available.'));
+  reason.append(el('h5', '', 'Automated QA Assessment'), el('div', 'finding-item', qa.reason || 'No assessment reason available.'));
   card.appendChild(reason);
 
   const identifiers = el('div', 'finding-section');
-  identifiers.appendChild(el('h5', '', 'Patient Identifiers'));
+  identifiers.appendChild(el('h5', '', 'Confirmed Patient Identifiers'));
   const names = analysis.patientIdentifiers?.names || [];
   const hospitalNumbers = analysis.patientIdentifiers?.hospitalNumbers || [];
-  if (!names.length && !hospitalNumbers.length) {
-    identifiers.appendChild(el('div', 'finding-item', 'No patient identifiers were reliably extracted.'));
-  }
+  if (!names.length && !hospitalNumbers.length) identifiers.appendChild(el('div', 'finding-item', 'No high-confidence patient identifiers were extracted.'));
   names.forEach((name, index) => identifiers.appendChild(createMaskedFinding(`Patient name${names.length > 1 ? ` ${index + 1}` : ''}`, name, '••••••••••')));
   hospitalNumbers.forEach((id, index) => identifiers.appendChild(createMaskedFinding(`Hospital ID${hospitalNumbers.length > 1 ? ` ${index + 1}` : ''}`, id, '••••••')));
   card.appendChild(identifiers);
 
   const issues = analysis.summaryTable || [];
   if (issues.length) card.appendChild(createIssuesTable(issues));
+  else card.appendChild(el('div', 'finding-item positive', 'No configured automated QA finding requires manual review.'));
 
   const recommendations = createRecommendations(analysis);
   if (recommendations) card.appendChild(recommendations);
-
-  if (Array.isArray(safety.immediateActions) && safety.immediateActions.length) {
-    const actions = el('div', 'immediate-actions');
-    actions.appendChild(el('h4', '', 'Immediate Actions Required'));
-    safety.immediateActions.forEach(action => actions.appendChild(el('div', 'action-item', action)));
-    card.appendChild(actions);
-  }
-
   return card;
 }
 
@@ -311,13 +318,9 @@ async function updateStatusIndicators() {
   try {
     const status = await window.electronAPI.getBackendStatus();
     setStatus(backendStatus, status.status === 'running' ? 'Ready' : 'Error', status.status === 'running' ? 'connected' : 'error');
-    if (status.ollama !== 'connected') {
-      setStatus(ollamaStatus, 'Disconnected', 'error');
-    } else if (!status.models?.ocr || !status.models?.analysis) {
-      setStatus(ollamaStatus, 'Models Missing', 'warning');
-    } else {
-      setStatus(ollamaStatus, 'Connected', 'connected');
-    }
+    if (status.ollama !== 'connected') setStatus(ollamaStatus, 'Disconnected', 'error');
+    else if (!status.models?.ocr || !status.models?.analysis) setStatus(ollamaStatus, 'Models Missing', 'warning');
+    else setStatus(ollamaStatus, 'Connected', 'connected');
   } catch (_) {
     setStatus(backendStatus, 'Error', 'error');
     setStatus(ollamaStatus, 'Disconnected', 'error');
@@ -344,6 +347,9 @@ fileUploadArea.addEventListener('click', event => {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
+  showLoading(false);
+  selectedFilesDiv.style.display = 'none';
+  resultsSection.style.display = 'none';
   updateStatusIndicators();
   setInterval(updateStatusIndicators, 10000);
 });

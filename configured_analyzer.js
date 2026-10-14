@@ -1,9 +1,9 @@
 'use strict';
 
-const ComprehensiveAnalyzer = require('./comprehensive_analyzer');
+const ScanFidelityAnalyzer = require('./scan_fidelity_analyzer');
 const { getConfiguredModels } = require('./model_config');
 
-class ConfiguredAnalyzer extends ComprehensiveAnalyzer {
+class ConfiguredAnalyzer extends ScanFidelityAnalyzer {
   constructor(options = {}) {
     const { env = process.env, ...rest } = options;
     const models = getConfiguredModels(env);
@@ -13,6 +13,12 @@ class ConfiguredAnalyzer extends ComprehensiveAnalyzer {
       textModel: rest.textModel || models.text,
       imageModel: rest.imageModel || models.image
     });
+  }
+
+  log(event, details = {}) {
+    const safeDetails = { ...details };
+    delete safeDetails.fileName;
+    console.log(`[ScanAuditor] ${event}`, safeDetails);
   }
 }
 
