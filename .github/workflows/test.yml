@@ -20,4 +20,5 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test
-      - run: python -m py_compile pdf_to_images.py
+      - run: python -m py_compile pdf_to_images.py image_metrics.py
+      - run: python -m unittest test_image_metrics.py
