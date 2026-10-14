@@ -1,86 +1,60 @@
-# Quick Start Guide - ScanAuditor
+# Quick Start - ScanAuditor
 
-## Prerequisites Installation
+## Prerequisites
 
-### 1. Install Node.js
-- Go to [https://nodejs.org/](https://nodejs.org/)
-- Download and install the LTS version
-- Verify installation: `node --version`
+Install:
 
-### 2. Install Ollama
-- Go to [https://ollama.ai/](https://ollama.ai/)
-- Download and install for your operating system
-- Start Ollama: `ollama serve`
+- Node.js 18 or later
+- Python 3.10 or later
+- Ollama
+- Poppler for PDF conversion
 
-### 3. Pull the AI Model
+Pull both local AI models:
+
 ```bash
 ollama pull qwen2.5vl:7b
+ollama pull gemma3n:latest
 ```
 
-## Quick Setup
+## Windows setup
 
-### Option 1: Automated Setup (Windows)
-1. **Run the setup script:**
-   
-   **In Command Prompt:**
-   ```cmd
-   setup.bat
-   ```
-   
-   **In PowerShell:**
-   ```powershell
-   .\setup.bat
-   ```
-   
-   Or run the PowerShell script directly:
-   ```powershell
-   .\setup.ps1
-   ```
-   
-2. Follow the prompts
+Run either:
 
-### Option 2: Manual Setup
+```bat
+setup.bat
+```
+
+or:
+
+```powershell
+.\setup.ps1
+```
+
+The setup installs Node dependencies, creates `paddleocr_env`, installs the active Python PDF-conversion dependencies, and checks both Ollama models.
+
+## Run
+
+Start Ollama, then:
+
 ```bash
-# Install dependencies
-npm install
-
-# Start the application
 npm start
 ```
 
-## Using the Application
+## Use
 
-1. **Launch**: Run `npm start` to open the application
-2. **Select Files**: Click "Browse Files" or drag & drop medical records
-3. **Analyze**: Click "Analyze Files" to process the documents
-4. **Review Results**: Check the analysis results and any issues found
-
-## Test Files
-
-The application includes sample files for testing:
-- `sample-medical-record.txt` - Single patient record
-- `sample-multi-patient-record.txt` - Multiple patients (should fail validation)
+1. Select or drag-and-drop PDF medical records.
+2. Click **Analyze Files**.
+3. ScanAuditor processes every page.
+4. Review the safety status, identifier coverage, patient-identity conflicts, date findings, and scan-quality findings.
+5. Export to Excel only when appropriate; the export contains patient names and hospital numbers in clear text.
 
 ## Troubleshooting
 
-### Common Issues:
-- **"Ollama not connected"**: Ensure `ollama serve` is running
-- **"Model not found"**: Run `ollama pull qwen2.5vl:7b`
-- **"Backend error"**: Check if port 3001 is available
+- **Ollama disconnected**: make sure Ollama is running on `127.0.0.1:11434`.
+- **Models Missing**: pull `qwen2.5vl:7b` and `gemma3n:latest`.
+- **PDF conversion error**: verify Poppler is installed or set the `POPPLER_PATH` environment variable.
+- **Analysis incomplete**: failed OCR or structured extraction pages prevent a `Safe for Use` result. Resolve the failure and rerun the audit.
 
-### Status Indicators:
-- **Green**: Connected and ready
-- **Red**: Disconnected or error
-- **Yellow**: Checking connection
+The current production audit path supports PDF files only. The sample `.txt` files are intended for the optional learning CLI, not the main Electron audit.
 
-## Analysis Results
-
-The application checks:
-- ✅ Patient name matches filename
-- ✅ Only one patient in document
-- ✅ Document contains single patient records
-- ⚠️ Issues and discrepancies found
-
-## Support
-
-For detailed documentation, see `README.md` 
+For more detail, see `README.md`, `PDF_CONVERSION_SETUP.md`, and `LEARNING_GUIDE.md`.
