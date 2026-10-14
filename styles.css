@@ -761,6 +761,13 @@ body {
     background: #c53030;
 }
 
+/* Start hidden; renderer.js shows these. Inline style attributes are blocked by the CSP. */
+#selected-files,
+#results-section,
+#loading-overlay {
+    display: none;
+}
+
 /* Loading Overlay */
 .loading-overlay {
     position: fixed;
