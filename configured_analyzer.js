@@ -1,9 +1,9 @@
 'use strict';
 
-const ScanFidelityAnalyzer = require('./scan_fidelity_analyzer');
+const ResilientScanFidelityAnalyzer = require('./resilient_analyzer');
 const { getConfiguredModels } = require('./model_config');
 
-class ConfiguredAnalyzer extends ScanFidelityAnalyzer {
+class ConfiguredAnalyzer extends ResilientScanFidelityAnalyzer {
   constructor(options = {}) {
     const { env = process.env, ...rest } = options;
     const models = getConfiguredModels(env);
