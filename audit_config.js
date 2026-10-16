@@ -17,6 +17,10 @@ function numberSetting(value, fallback, minimum, maximum) {
 const AUDIT_CONFIG = Object.freeze({
   dpi: integerSetting(process.env.SCANAUDITOR_DPI, 300, 150, 600),
   imageBatchSize: integerSetting(process.env.SCANAUDITOR_IMAGE_BATCH_SIZE, 2, 1, 4),
+  ocrAttempts: integerSetting(process.env.SCANAUDITOR_OCR_ATTEMPTS, 3, 1, 5),
+  structuredAttempts: integerSetting(process.env.SCANAUDITOR_STRUCTURED_ATTEMPTS, 2, 1, 4),
+  continuationAttempts: integerSetting(process.env.SCANAUDITOR_CONTINUATION_ATTEMPTS, 2, 1, 4),
+  retryDelayMs: integerSetting(process.env.SCANAUDITOR_RETRY_DELAY_MS, 750, 0, 10000),
   nearDuplicateHammingDistance: integerSetting(
     process.env.SCANAUDITOR_DUPLICATE_HAMMING_DISTANCE,
     4,
