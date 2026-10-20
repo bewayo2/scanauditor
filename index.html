@@ -61,6 +61,7 @@
         <p id="cost-basis" class="small-note">Run a PDF to see the page-based cost breakdown.</p>
         <div class="cost-planning">
           <div><label for="forecast-target-pages">Optional future target (pages)</label><input type="number" id="forecast-target-pages" min="1" max="100000000" step="1" placeholder="Leave blank" /></div>
+          <div><label for="forecast-basis">Future forecast uses</label><select id="forecast-basis"><option value="latest-run">Latest matching run (default)</option><option value="historical">Historical average across runs</option></select></div>
           <div><label for="planning-input-tokens">Estimated input tokens / page</label><input type="number" id="planning-input-tokens" min="1" max="1000000" step="100" value="5000" /></div>
           <div><label for="planning-output-tokens">Estimated output tokens / page</label><input type="number" id="planning-output-tokens" min="1" max="100000" step="100" value="500" /></div>
           <div><label for="fallback-percent">Estimated Sol fallback %</label><input type="number" id="fallback-percent" min="0" max="100" step="1" value="10" /></div>
