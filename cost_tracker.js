@@ -12,8 +12,7 @@ const MODEL_PRICING = Object.freeze({
   'gpt-6-astra': Object.freeze({ input: 10.00, cachedInput: 1.00, output: 50.00 })
 });
 const DEFAULT_PLAN = Object.freeze({
-  totalRecords: 100000,
-  averagePagesPerRecord: 4,
+  targetPages: null,
   estimatedInputTokensPerPage: 5000,
   estimatedOutputTokensPerPage: 500,
   fallbackPercent: 10
@@ -25,8 +24,9 @@ function finiteRange(value, fallback, min, max) {
 }
 function validatePlan(value = {}) {
   return {
-    totalRecords: Math.floor(finiteRange(value.totalRecords, DEFAULT_PLAN.totalRecords, 1, 10000000)),
-    averagePagesPerRecord: finiteRange(value.averagePagesPerRecord, DEFAULT_PLAN.averagePagesPerRecord, 0.1, 10000),
+    // Optional extrapolation, never the page count of the current run.
+    targetPages: value.targetPages === '' || value.targetPages == null
+      ? null : Math.floor(finiteRange(value.targetPages, null, 1, 100000000)),
     estimatedInputTokensPerPage: Math.floor(finiteRange(value.estimatedInputTokensPerPage, DEFAULT_PLAN.estimatedInputTokensPerPage, 1, 1000000)),
     estimatedOutputTokensPerPage: Math.floor(finiteRange(value.estimatedOutputTokensPerPage, DEFAULT_PLAN.estimatedOutputTokensPerPage, 1, 100000)),
     fallbackPercent: finiteRange(value.fallbackPercent, DEFAULT_PLAN.fallbackPercent, 0, 100)
@@ -47,44 +47,74 @@ function planningPerPage(plan, mode = 'tiered') {
   if (mode === 'local') return 0;
   return usageCost('gpt-6-luna', tokens) + p.fallbackPercent / 100 * usageCost('gpt-6.1-sol', tokens);
 }
-function summarizeCost(entries, plan, mode = 'tiered') {
+function summarizeCost(entries, plan, mode = 'tiered', lastRun = null) {
   const p = validatePlan(plan);
-  const pages = new Set();
-  const modePages = new Set();
-  const byModel = {};
+  const allPages = new Set();
+  const runPages = new Set();
+  const selectedModePages = new Set();
+  const selectedModeModels = mode === 'astra'
+    ? new Set(['gpt-6-astra'])
+    : mode === 'tiered' ? new Set(['gpt-6-luna', 'gpt-6.1-sol']) : new Set();
+  const modelSpend = {};
   let recordedSpendUSD = 0;
-  let modeSpend = 0;
+  let runSpendUSD = 0;
+  let selectedModeSpendUSD = 0;
   let chargedCalls = 0;
-  const modeModels = mode === 'astra' ? new Set(['gpt-6-astra']) : new Set(['gpt-6-luna', 'gpt-6.1-sol']);
   for (const entry of entries) {
     if (!entry || !Object.hasOwn(MODEL_PRICING, entry.model)) continue;
     const cost = usageCost(entry.model, entry.usage);
     recordedSpendUSD += cost;
     chargedCalls += 1;
-    byModel[entry.model] = (byModel[entry.model] || 0) + cost;
-    if (modeModels.has(entry.model)) modeSpend += cost;
-    if (typeof entry.pageKey === 'string' && entry.pageKey) {
-      pages.add(entry.pageKey);
-      if (modeModels.has(entry.model)) modePages.add(entry.pageKey);
+    modelSpend[entry.model] = (modelSpend[entry.model] || 0) + cost;
+    if (entry.pageKey) allPages.add(entry.pageKey);
+    if (selectedModeModels.has(entry.model)) {
+      selectedModeSpendUSD += cost;
+      if (entry.pageKey) selectedModePages.add(entry.pageKey);
+    }
+    if (lastRun && entry.runId && entry.runId === lastRun.runId) {
+      runSpendUSD += cost;
+      if (entry.pageKey) runPages.add(entry.pageKey);
     }
   }
-  const processedPages = pages.size;
-  const plannedPages = Math.ceil(p.totalRecords * p.averagePagesPerRecord);
-  const observedPerPage = modePages.size ? modeSpend / modePages.size : null;
-  const plannedPerPage = planningPerPage(p, mode);
-  const perPage = observedPerPage === null ? plannedPerPage : observedPerPage;
-  const remainingPages = Math.max(0, plannedPages - processedPages);
+  const knownPages = lastRun && Number.isSafeInteger(lastRun.totalPages) && lastRun.totalPages >= 0
+    ? lastRun.totalPages : 0;
+  const activeMode = lastRun?.mode || 'local';
+  const isCloudRun = activeMode === 'tiered' || activeMode === 'astra';
+  const meteredRunPages = runPages.size;
+  const estimatedRunPerPage = isCloudRun ? planningPerPage(p, activeMode) : 0;
+  const observedRunPerPage = isCloudRun && meteredRunPages
+    ? runSpendUSD / meteredRunPages : null;
+  const runPerPage = observedRunPerPage === null ? estimatedRunPerPage : observedRunPerPage;
+  const unmeteredRunPages = Math.max(0, knownPages - meteredRunPages);
+  const runProjectedTotalUSD = runSpendUSD + unmeteredRunPages * runPerPage;
+
+  // An OPTIONAL future-page extrapolation is separate from the real scanned run.
+  // Prefer the selected mode's actual observed price rather than unrelated model usage.
+  const selectedObserved = selectedModePages.size
+    ? selectedModeSpendUSD / selectedModePages.size : null;
+  const targetPerPage = mode === 'local' ? 0
+    : selectedObserved === null ? planningPerPage(p, mode) : selectedObserved;
+
   return {
-    plan: p, mode, pricing: MODEL_PRICING, currency: 'USD',
-    recordedSpendUSD, chargedCalls, processedPages, byModel,
-    observedPerPageUSD: observedPerPage,
-    estimatedPerPageUSD: plannedPerPage,
-    forecastPerPageUSD: perPage,
-    plannedPages, remainingPages,
-    projectedRemainingUSD: remainingPages * perPage,
-    projectedTotalUSD: recordedSpendUSD + remainingPages * perPage,
-    costBasis: observedPerPage === null ? 'planning-assumption' : 'observed-api-usage',
-    disclaimer: 'Estimated API usage costs, not the provider invoice. Excludes failed requests without usage data, special tiers, taxes, and charges outside this app.'
+    plan: p,
+    currency: 'USD',
+    mode, pricing: MODEL_PRICING, byModel: modelSpend,
+    recordedSpendUSD, chargedCalls, allTimeMeteredPages: allPages.size,
+    run: lastRun ? {
+      runId: lastRun.runId, mode: activeMode, fileCount: lastRun.fileCount,
+      totalPages: knownPages, pagesUnknown: lastRun.pagesUnknown || 0,
+      meteredPages: meteredRunPages, unmeteredPages: unmeteredRunPages,
+      recordedSpendUSD: runSpendUSD,
+      observedPerPageUSD: observedRunPerPage,
+      forecastPerPageUSD: runPerPage,
+      projectedTotalUSD: runProjectedTotalUSD,
+      costBasis: observedRunPerPage === null ? 'planning-assumption' : 'observed-api-usage'
+    } : null,
+    targetPages: p.targetPages,
+    targetForecastPerPageUSD: targetPerPage,
+    targetProjectionUSD: p.targetPages === null ? null : targetPerPage * p.targetPages,
+    targetCostBasis: selectedObserved === null ? 'planning-assumption' : 'observed-api-usage',
+    disclaimer: 'API usage estimates only, not the provider invoice. Excludes unmetered failed requests, taxes, special processing tiers and other account activity.'
   };
 }
 function costDirectory(userData) { return path.join(userData, 'cost-tracker'); }
@@ -105,12 +135,39 @@ async function recordUsage(userData, entry) {
     timestamp: new Date().toISOString(),
     model: entry.model,
     pageKey: typeof entry.pageKey === 'string' ? entry.pageKey.slice(0, 100) : null,
+    runId: typeof entry.runId === 'string' ? entry.runId.slice(0, 100) : null,
     input_tokens: Math.max(0, Math.floor(Number(u.input_tokens) || 0)),
     output_tokens: Math.max(0, Math.floor(Number(u.output_tokens) || 0)),
     cached_tokens: Math.max(0, Math.floor(Number(u.input_tokens_details?.cached_tokens) || 0))
   };
   await fs.ensureDir(costDirectory(userData));
   await fs.appendFile(path.join(costDirectory(userData), 'usage.jsonl'), JSON.stringify(safe) + '\n');
+}
+async function recordRun(userData, run) {
+  const safe = {
+    runId: String(run.runId || '').slice(0, 100),
+    timestamp: new Date().toISOString(),
+    mode: ['local', 'tiered', 'astra'].includes(run.mode) ? run.mode : 'local',
+    fileCount: Math.max(0, Math.floor(Number(run.fileCount) || 0)),
+    totalPages: Math.max(0, Math.floor(Number(run.totalPages) || 0)),
+    pagesUnknown: Math.max(0, Math.floor(Number(run.pagesUnknown) || 0))
+  };
+  if (!safe.runId) throw new Error('Missing cost tracker run ID.');
+  await fs.ensureDir(costDirectory(userData));
+  await fs.appendFile(path.join(costDirectory(userData), 'runs.jsonl'), JSON.stringify(safe) + '\n');
+}
+async function latestRun(userData) {
+  const file = path.join(costDirectory(userData), 'runs.jsonl');
+  if (!(await fs.pathExists(file))) return null;
+  let last = null;
+  const reader = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
+  for await (const line of reader) {
+    try {
+      const candidate = JSON.parse(line);
+      if (candidate?.runId && ['local', 'tiered', 'astra'].includes(candidate.mode)) last = candidate;
+    } catch (_) { /* Ignore interrupted trailing write. */ }
+  }
+  return last;
 }
 async function getDashboard(userData, mode = 'tiered') {
   const entries = [];
@@ -121,13 +178,13 @@ async function getDashboard(userData, mode = 'tiered') {
     for await (const line of reader) {
       try {
         const x = JSON.parse(line);
-        entries.push({ model: x.model, pageKey: x.pageKey, usage: {
+        entries.push({ model: x.model, pageKey: x.pageKey, runId: x.runId, usage: {
           input_tokens: x.input_tokens, output_tokens: x.output_tokens,
           input_tokens_details: { cached_tokens: x.cached_tokens }
         } });
       } catch (_) { /* Ignore truncated line if a process was interrupted. */ }
     }
   }
-  return summarizeCost(entries, await loadPlan(userData), mode);
+  return summarizeCost(entries, await loadPlan(userData), mode, await latestRun(userData));
 }
-module.exports = { MODEL_PRICING, DEFAULT_PLAN, validatePlan, usageCost, planningPerPage, summarizeCost, loadPlan, savePlan, recordUsage, getDashboard };
+module.exports = { MODEL_PRICING, DEFAULT_PLAN, validatePlan, usageCost, planningPerPage, summarizeCost, loadPlan, savePlan, recordUsage, recordRun, getDashboard };
