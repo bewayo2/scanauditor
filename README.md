@@ -62,7 +62,7 @@ Results are **Automated QA Passed**, **Review Required**, or **Analysis Failed**
 
 The user can select **Local only**, **GPT-6 Luna with GPT-6.1 Sol fallback**, or **GPT-6 Astra benchmark**. One cloud multimodal request per page extracts text, patient fields, dates, and quality observations. The app only sends medical images externally when cloud mode is explicitly selected, an API key has been entered, and hospital authorization is confirmed. The API key is kept in memory for this session, not persisted.
 
-The **Project Cost Tracker** uses observed API token usage to calculate estimated spending to date and a cost-per-page forecast over a configurable project volume (default 100,000 records). This is not a billing invoice. For setup, rates and privacy requirements, read [OPENAI_SETUP.md](OPENAI_SETUP.md).
+The **Scan Cost Tracker** automatically totals the pages in the most recent PDF analysis run, estimates that run's API spend and cost per page, and separately shows cumulative API spend across runs. An optional future-page count can be entered for extrapolation, but there is no fixed 100,000-record default. It is not a billing invoice. For setup, rates and privacy requirements, read [OPENAI_SETUP.md](OPENAI_SETUP.md).
 
 ## Prerequisites
 
