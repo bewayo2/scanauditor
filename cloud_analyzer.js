@@ -60,6 +60,14 @@ class CloudScanAnalyzer extends ConfiguredAnalyzer {
       throw error;
     }
     this.pageCache.set(pageNumber, best);
+    this.setStage(pageNumber, 'cloudModels', {
+      provider: 'openai',
+      firstPassModel: this.primaryModel,
+      fallbackModel: fallbackAttempted ? this.fallbackModel : null,
+      selectedModel: best === first ? this.primaryModel : this.fallbackModel,
+      fallbackUsed: fallbackAttempted,
+      qualityObservationCount: Array.isArray(best.qualityObservations) ? best.qualityObservations.length : 0
+    });
     this.setStage(pageNumber, 'ocr', {
       status: 'passed',
       attempts: fallbackAttempted ? 2 : 1,
@@ -107,7 +115,7 @@ class CloudScanAnalyzer extends ConfiguredAnalyzer {
       blurryPages: [], darkPages: [], lightPages: [], unreadablePages: [],
       cutoffPages: [], incompletePages: [], upsideDownPages: [], sidewaysPages: [],
       misalignedPages: [], visionDuplicateGroups: [], exactDuplicateGroups: [],
-      possibleDuplicateGroups: []
+      possibleDuplicateGroups: [], qualityEvidence: []
     };
     const flags = {
       blurry: 'blurryPages', dark: 'darkPages', light: 'lightPages',
@@ -125,6 +133,19 @@ class CloudScanAnalyzer extends ConfiguredAnalyzer {
       }
       for (const field of QUALITY_FIELDS) {
         if (result.quality[field] === true) combined[flags[field]].push(page);
+      }
+      // These are controlled categories only; never persist free-form OCR or PHI.
+      for (const observation of Array.isArray(result.qualityObservations) ? result.qualityObservations : []) {
+        if (!QUALITY_FIELDS.includes(observation?.type) || result.quality[observation.type] !== true) continue;
+        const region = ['top', 'middle', 'bottom', 'left', 'right', 'whole-page', 'unknown'].includes(observation.region) ? observation.region : 'unknown';
+        const reason = ['clipped-content', 'missing-image-region', 'illegible-printed-text', 'incorrect-rotation',
+          'low-contrast-print', 'blurred-print', 'original-handwriting', 'faint-original', 'other', 'none'].includes(observation.reason)
+          ? observation.reason : 'other';
+        combined.qualityEvidence.push({
+          pageNumber: page, type: observation.type,
+          confidence: ['high', 'medium', 'low'].includes(observation.confidence) ? observation.confidence : 'low',
+          region, reason, materialLoss: observation.materialLoss === true
+        });
       }
     }
     combined.exactDuplicateGroups = await this.findExactDuplicateImages(imagePaths);
