@@ -105,7 +105,7 @@ test('different encounters on different pages do not create a false discharge-be
   assert.equal(issues.mismatches.length, 0);
 });
 
-test('same-page discharge before admission requires review', () => {
+test('same-page date anomaly is informational rather than a scanning defect', () => {
   const analyzer = new ScanFidelityAnalyzer();
   const high = (label, normalizedDate) => ({ label, value: normalizedDate, normalizedDate, confidence: 'high', evidence: '' });
   const text = analyzer.combinePageAnalyses([
@@ -113,8 +113,8 @@ test('same-page discharge before admission requires review', () => {
   ], 1);
   attachLinkage(text, { identifiedPages: [1] });
   const qa = analyzer.evaluateQa(text, cleanImages(), cleanMetrics());
-  assert.equal(qa.status, 'review-required');
-  assert.ok(qa.findings.some(item => item.code === 'DATE_ANOMALY'));
+  assert.equal(qa.status, 'passed');
+  assert.ok(qa.informationalFindings.some(item => item.code === 'DATE_ANOMALY'));
 });
 
 test('near duplicate requires both perceptual and OCR similarity', () => {
