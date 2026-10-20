@@ -25,8 +25,10 @@ function finiteRange(value, fallback, min, max) {
 function validatePlan(value = {}) {
   return {
     // Optional extrapolation, never the page count of the current run.
-    targetPages: value.targetPages === '' || value.targetPages == null
-      ? null : Math.floor(finiteRange(value.targetPages, null, 1, 100000000)),
+    targetPages: value.targetPages === '' || value.targetPages == null ||
+      !Number.isSafeInteger(Number(value.targetPages)) ||
+      Number(value.targetPages) < 1 || Number(value.targetPages) > 100000000
+      ? null : Number(value.targetPages),
     estimatedInputTokensPerPage: Math.floor(finiteRange(value.estimatedInputTokensPerPage, DEFAULT_PLAN.estimatedInputTokensPerPage, 1, 1000000)),
     estimatedOutputTokensPerPage: Math.floor(finiteRange(value.estimatedOutputTokensPerPage, DEFAULT_PLAN.estimatedOutputTokensPerPage, 1, 100000)),
     fallbackPercent: finiteRange(value.fallbackPercent, DEFAULT_PLAN.fallbackPercent, 0, 100)
