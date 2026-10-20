@@ -30,6 +30,12 @@ async function classifyContinuationPage({ analyzer, pageContexts, index, fileNam
   const totalPages = pageContexts.length;
 
   const explicit = parseExplicitPageSequence(current.ocrText);
+  if (explicit && pageNumber === 1 && explicit.current === 1 && explicit.total === totalPages) {
+    return {
+      entry: { pageNumber, classification: 'document-start', confidence: 'high', direction: 'none', method: 'explicit-pagination' },
+      diagnostic: { status: 'passed', method: 'explicit-pagination', pageSequence: '1/' + totalPages }
+    };
+  }
   if (explicit && pageNumber > 1 && explicit.current === pageNumber && explicit.total === totalPages) {
     return {
       entry: {
@@ -99,7 +105,9 @@ async function classifyContinuationPage({ analyzer, pageContexts, index, fileNam
   const classification = String(result.classification || '').toLowerCase();
   const confidence = String(result.confidence || '').toLowerCase();
   const direction = String(result.direction || 'none').toLowerCase();
-  if (classification === 'continuation' && confidence === 'high') {
+  // A first PDF page cannot continue a preceding page in this PDF. Without an
+  // explicit start marker it remains unresolved, even if a model calls it continuation.
+  if (classification === 'continuation' && confidence === 'high' && pageNumber > 1) {
     return {
       entry: { pageNumber, classification: 'continuation', confidence: 'high', direction, method: 'model' },
       diagnostic: { status: 'passed', method: 'model', attempts: outcome.attemptsUsed }
