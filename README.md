@@ -1,8 +1,8 @@
 # ScanAuditor
 
-ScanAuditor is a local Electron application for auditing scanned PDF medical records. It converts every PDF page to an image, uses local Ollama models to extract evidence, and then applies deterministic JavaScript rules to decide whether the document needs review.
+ScanAuditor is a desktop application for auditing the fidelity of scanned PDF medical records. It processes every page and applies deterministic JavaScript QA rules. Local Ollama processing is the default; hospital-authorized OpenAI vision models are optional.
 
-## Current audit pipeline
+## Local audit pipeline
 
 1. **PDF conversion** — every page is converted to a PNG with `pdf2image` and Poppler.
 2. **OCR** — `qwen3-vl:8b-instruct` extracts text from each page image.
@@ -47,25 +47,22 @@ OCR and image-quality analysis always use the configured vision model. The Elect
 
 - **PDF only.** The current production audit path intentionally accepts only PDF files.
 - **Every page is processed.** There is no five-page testing limit.
-- **OCR failures never count as successful coverage.** Any failed page makes the audit incomplete and prevents a `Safe for Use` result.
+- **OCR failures never count as successful coverage.** Any failed page makes the audit incomplete and triggers an automated QA finding.
 - **Hospital numbers are exact identifiers.** Numbers that differ by one digit are kept separate and treated as a possible patient-identity conflict.
 - **Names are merged conservatively.** Sharing only a surname is not enough to treat two people as the same patient.
 - **Original PDFs are not copied to an uploads folder.** The application reads the selected file in place. Temporary page images are deleted after each analysis.
 - **Production logs do not print extracted medical text or patient identifiers.**
 - **Excel export contains clear-text patient identifiers.** The UI warns before export.
 
-## Safety decision
+## Automated QA decisions
 
-A document is not marked safe when any of these conditions is true:
+Results are **Automated QA Passed**, **Review Required**, or **Analysis Failed**. Missing identifiers do not by themselves imply a bad scan; the app looks for continuation pages. Unreadable/cutoff pages, identity conflicts, uncertainty, anomalies, duplicates, and failed analysis are reported conservatively. The app cannot prove source-paper completeness, clinical correctness, or that an issue was introduced during scanning.
 
-- one or more pages failed OCR or structured extraction;
-- visual analysis failed for part of the document;
-- fewer than 50% of all document pages contain a recognized patient name or hospital number;
-- more than one distinct patient name or hospital number is present;
-- a discharge date is earlier than an admission date;
-- a page is unreadable, cut off, or incomplete.
+## Optional OpenAI models and costing
 
-Blur, darkness, light pages, orientation issues, duplicate pages, and chronological-order warnings are reported separately and can trigger manual review recommendations.
+The user can select **Local only**, **GPT-6 Luna with GPT-6.1 Sol fallback**, or **GPT-6 Astra benchmark**. One cloud multimodal request per page extracts text, patient fields, dates, and quality observations. The app only sends medical images externally when cloud mode is explicitly selected, an API key has been entered, and hospital authorization is confirmed. The API key is kept in memory for this session, not persisted.
+
+The **Project Cost Tracker** uses observed API token usage to calculate estimated spending to date and a cost-per-page forecast over a configurable project volume (default 100,000 records). This is not a billing invoice. For setup, rates and privacy requirements, read [OPENAI_SETUP.md](OPENAI_SETUP.md).
 
 ## Prerequisites
 
