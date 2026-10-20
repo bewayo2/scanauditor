@@ -13,6 +13,7 @@ const costTracker = require('./cost_tracker');
 const { ACTIVE_MODELS, isModelInstalled } = require('./model_config');
 const { AUDIT_CONFIG } = require('./audit_config');
 const { appendAuditRecord } = require('./audit_logger');
+const reviewDispositions = require('./review_dispositions');
 
 let mainWindow;
 // In-memory only. Never save or log the hospital's API key.
@@ -159,6 +160,11 @@ function exportToExcel(analysisResults) {
       'Patient Names': excelSafe(analysis.patientIdentifiers?.names || []),
       'Hospital Numbers': excelSafe(analysis.patientIdentifiers?.hospitalNumbers || []),
       'Finding Codes': excelSafe((qa.findings || []).map(item => item.code)),
+      'Informational Observations': excelSafe((qa.informationalFindings || []).map(item => item.code)),
+      'Manual Disposition': excelSafe(analysis.manualDisposition?.outcome || ''),
+      'Disposition Basis': excelSafe(analysis.manualDisposition?.comparisonBasis || ''),
+      'Primary Model': excelSafe(analysis.analysisMetadata?.models?.ocr || ''),
+      'Fallback Model': excelSafe(analysis.analysisMetadata?.models?.fallback || ''),
       'Issue Types': excelSafe((analysis.summaryTable || []).map(issue => issue.issueType)),
       'Pages Affected': excelSafe((analysis.summaryTable || []).map(issue => issue.pagesAffected)),
       'Exact Duplicate Groups': excelSafe(formatGroups(images.exactDuplicateGroups)),
@@ -216,6 +222,10 @@ ipcMain.handle('select-files', async () => {
 });
 
 ipcMain.handle('get-backend-status', getOllamaStatus);
+ipcMain.handle('get-review-disposition', (_event, fileSha256) =>
+  reviewDispositions.getDisposition(app.getPath('userData'), fileSha256));
+ipcMain.handle('save-review-disposition', (_event, payload) =>
+  reviewDispositions.saveDisposition(app.getPath('userData'), payload));
 
 ipcMain.handle('set-openai-key', (_event, value) => {
   if (typeof value !== 'string' || value.trim().length < 10 || value.length > 300) {
