@@ -48,25 +48,26 @@
 
       <section class="cost-section" aria-labelledby="cost-heading">
         <div class="section-header">
-          <h2 id="cost-heading">Project Cost Tracker</h2>
-          <p>USD estimates based on OpenAI token usage and published standard token prices. This is not the provider billing invoice.</p>
+          <h2 id="cost-heading">Scan Cost Tracker</h2>
+          <p>The last run's page count is read directly from the PDFs analyzed. No fixed record count is assumed. All amounts are estimated USD API charges, not a billing invoice.</p>
         </div>
         <div class="cost-cards">
-          <div class="cost-card"><span>Recorded API spend</span><strong id="cost-spent">—</strong></div>
-          <div class="cost-card"><span>Estimated cost / page</span><strong id="cost-page">—</strong></div>
-          <div class="cost-card"><span>Projected project total</span><strong id="cost-total">—</strong></div>
-          <div class="cost-card"><span>Pages metered / planned</span><strong id="cost-pages">—</strong></div>
+          <div class="cost-card"><span>Pages in last run</span><strong id="cost-run-pages">—</strong></div>
+          <div class="cost-card"><span>API spend for last run</span><strong id="cost-run-spent">—</strong></div>
+          <div class="cost-card"><span>Est. cost per page (last run)</span><strong id="cost-page">—</strong></div>
+          <div class="cost-card"><span>Est. total for last run</span><strong id="cost-total">—</strong></div>
+          <div class="cost-card"><span>API spend across all runs</span><strong id="cost-spent">—</strong></div>
         </div>
-        <p id="cost-basis" class="small-note">Loading project estimates…</p>
+        <p id="cost-basis" class="small-note">Run a PDF to see the page-based cost breakdown.</p>
         <div class="cost-planning">
-          <div><label for="project-records">Total records</label><input type="number" id="project-records" min="1" max="10000000" step="1" value="100000" /></div>
-          <div><label for="average-pages">Average pages / record</label><input type="number" id="average-pages" min="0.1" max="10000" step="0.1" value="4" /></div>
-          <div><label for="planning-input-tokens">Assumed input tokens / page</label><input type="number" id="planning-input-tokens" min="1" max="1000000" step="100" value="5000" /></div>
-          <div><label for="planning-output-tokens">Assumed output tokens / page</label><input type="number" id="planning-output-tokens" min="1" max="100000" step="100" value="500" /></div>
+          <div><label for="forecast-target-pages">Optional future target (pages)</label><input type="number" id="forecast-target-pages" min="1" max="100000000" step="1" placeholder="Leave blank" /></div>
+          <div><label for="planning-input-tokens">Estimated input tokens / page</label><input type="number" id="planning-input-tokens" min="1" max="1000000" step="100" value="5000" /></div>
+          <div><label for="planning-output-tokens">Estimated output tokens / page</label><input type="number" id="planning-output-tokens" min="1" max="100000" step="100" value="500" /></div>
           <div><label for="fallback-percent">Estimated Sol fallback %</label><input type="number" id="fallback-percent" min="0" max="100" step="1" value="10" /></div>
-          <button id="save-cost-plan" type="button" class="btn btn-secondary">Save Projection Settings</button>
+          <button id="save-cost-plan" type="button" class="btn btn-secondary">Save Cost Assumptions</button>
         </div>
-        <p class="small-note">Projected costs use assumed page/token volumes until API usage is observed, then use the observed average. Changes in pricing, case mix, retries, and model mix can change actual bills.</p>
+        <p id="cost-target-projection" class="small-note">Optional future-project forecast: none entered.</p>
+        <p class="small-note">If a scan fails or some pages return no API token usage, the remaining pages are estimated separately. Future-page projections never replace the actual page total of the last run.</p>
       </section>
 
       <section class="file-section">
