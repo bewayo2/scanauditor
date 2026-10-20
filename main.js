@@ -2,6 +2,7 @@
 
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
+const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const fs = require('fs-extra');
 const axios = require('axios');
@@ -245,12 +246,13 @@ ipcMain.handle('analyze-files', async (_event, request) => {
   if (mode !== 'local' && (!sessionOpenAIKey || request?.hospitalApproved !== true)) {
     throw new Error('Hospital authorization and a hospital-owned API key are required for cloud processing.');
   }
+  const runId = crypto.randomUUID();
   const analyzer = mode === 'local'
     ? new ConfiguredAnalyzer()
     : new CloudScanAnalyzer({
       apiKey: sessionOpenAIKey,
       mode,
-      onUsage: entry => costTracker.recordUsage(app.getPath('userData'), entry)
+      onUsage: entry => costTracker.recordUsage(app.getPath('userData'), { ...entry, runId })
     });
   const results = [];
 
@@ -272,7 +274,17 @@ ipcMain.handle('analyze-files', async (_event, request) => {
     await writeAuditRecord(result);
   }
 
-  return { results };
+  // Record only page counts and the run identifier; never store filenames or PHI.
+  const totalPages = results.reduce((sum, result) => sum + (Number(result?.analysis?.fileInformation?.totalPages) || 0), 0);
+  const pagesUnknown = results.filter(result => !(Number(result?.analysis?.fileInformation?.totalPages) > 0)).length;
+  try {
+    await costTracker.recordRun(app.getPath('userData'), {
+      runId, mode, fileCount: results.length, totalPages, pagesUnknown
+    });
+  } catch (_) {
+    console.error('[ScanAuditor] cost_run_record_failed');
+  }
+  return { results, runId };
 });
 
 ipcMain.handle('export-to-excel', async (_event, analysisResults) => {
