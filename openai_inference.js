@@ -26,6 +26,18 @@ const QUALITY_FIELDS = [
   'blurry', 'dark', 'light', 'unreadable', 'cutoff', 'incomplete',
   'upsideDown', 'sideways', 'misaligned'
 ];
+// Only enumerated, non-PHI quality evidence may be returned or displayed.
+const QUALITY_OBSERVATION = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    type: { type: 'string', enum: QUALITY_FIELDS },
+    confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+    region: { type: 'string', enum: ['top', 'middle', 'bottom', 'left', 'right', 'whole-page', 'unknown'] },
+    reason: { type: 'string', enum: ['clipped-content', 'missing-image-region', 'illegible-printed-text', 'incorrect-rotation', 'low-contrast-print', 'blurred-print', 'original-handwriting', 'faint-original', 'other', 'none'] },
+    materialLoss: { type: 'boolean' }
+  },
+  required: ['type', 'confidence', 'region', 'reason', 'materialLoss']
+};
 const PAGE_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: {
@@ -34,13 +46,14 @@ const PAGE_SCHEMA = {
     hospitalNumbers: { type: 'array', items: CANDIDATE },
     dates: { type: 'array', items: DATE },
     warnings: { type: 'array', items: { type: 'string' } },
+    qualityObservations: { type: 'array', items: QUALITY_OBSERVATION },
     quality: {
       type: 'object', additionalProperties: false,
       properties: Object.fromEntries(QUALITY_FIELDS.map(field => [field, { type: 'boolean' }])),
       required: QUALITY_FIELDS
     }
   },
-  required: ['ocrText', 'patientNames', 'hospitalNumbers', 'dates', 'warnings', 'quality']
+  required: ['ocrText', 'patientNames', 'hospitalNumbers', 'dates', 'warnings', 'qualityObservations', 'quality']
 };
 
 const PAGE_PROMPT = [
@@ -50,7 +63,11 @@ const PAGE_PROMPT = [
   'Extract 5- or 6-digit hospital numbers ONLY when associated with Hospital #, Hospital Number or Patient ID labels.',
   'Do not guess unclear digits. Mark any unclear identifier medium/low confidence, not high. No fuzzy corrections.',
   'Extract relevant document dates. Only normalize unambiguous dates to YYYY-MM-DD. Evidence: short field-location explanation, no long PHI.',
-  'Report observable blurry/dark/light/unreadable/cutoff/incomplete/orientation issues, without attributing them to scanning.',
+  'Distinguish original-document imperfections (difficult handwriting, faint ink, crossed-out text) from possible reproduction defects. The image alone cannot prove a defect was introduced by scanning.',
+  'Mark unreadable only if substantial PRINTED content is illegible, not when handwriting is hard to decipher. Do not mark a page blurry merely because the source handwriting is messy.',
+  'For each true quality flag include a qualityObservations item (type, confidence, region, reason, materialLoss). Use only the allowed categories; do not include names, numbers, or OCR passages in qualityObservations.',
+  'Set materialLoss true ONLY when visible evidence strongly suggests printed information was clipped, is missing, or is materially illegible, or the page orientation prevents reading it. Otherwise false. Do not infer missing pages or source-paper damage from a blank field.',
+  'Flag low contrast, blur or rotation conservatively. A slight tilt or faint original writing is not a material digitization defect.',
   'Do not decide overall QA status. Use empty arrays if no relevant fields. Return JSON matching the schema.'
 ].join('\n');
 
