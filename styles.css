@@ -862,7 +862,7 @@ body {
 .provider-fields label, .cost-planning label {
     display: block; font-size: 13px; font-weight: 600; color: #46546a; margin-bottom: 5px;
 }
-.provider-fields select, .provider-fields input[type=password], .cost-planning input {
+.provider-fields select, .provider-fields input[type=password], .cost-planning input, .cost-planning select {
     width: 100%; min-height: 42px; padding: 9px 12px; border: 1px solid #cad3e2;
     background: #fff; border-radius: 8px; font: inherit; color: #263547;
 }
