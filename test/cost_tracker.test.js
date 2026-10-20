@@ -238,7 +238,7 @@ test('older ledger entries without run IDs remain in spend but not inflated hist
 test('historical method falls back to planning when paid page-run sample is absent', () => {
   const result = summarizeCost([], { ...plan, targetPages: 1000000, forecastBasis: 'historical' }, 'tiered');
   assert.equal(result.targetForecastSource, 'planning-assumption');
-  assert.equal(result.targetProjectionUSD, 2250);
+  assert.ok(Math.abs(result.targetProjectionUSD - 2250) < 1e-6);
 });
 
 test('forecast basis saves locally and invalid values return to latest-run default', async t => {
