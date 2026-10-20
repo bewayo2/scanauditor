@@ -240,7 +240,7 @@ ipcMain.handle('clear-openai-key', () => {
 });
 ipcMain.handle('get-openai-key-status', () => ({ configured: Boolean(sessionOpenAIKey) }));
 ipcMain.handle('get-cost-dashboard', (_event, mode) => {
-  return costTracker.getDashboard(app.getPath('userData'), ['tiered', 'astra'].includes(mode) ? mode : 'tiered');
+  return costTracker.getDashboard(app.getPath('userData'), ['local', 'tiered', 'astra'].includes(mode) ? mode : 'tiered');
 });
 ipcMain.handle('save-cost-plan', async (_event, plan) => {
   await costTracker.savePlan(app.getPath('userData'), plan);
