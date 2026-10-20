@@ -150,3 +150,103 @@ test('disk ledger separates a run from all-time spend without retaining filename
   assert.equal(written.trim().split('\n').length, 2);
   assert.equal(written.includes('filename'), false);
 });
+
+
+function fourPageCostRun(runId, fileHash = 'same-pdf') {
+  const pageEntries = Array.from({ length: 4 }, (_, index) => ({
+    runId, model: 'gpt-6-luna', pageKey: fileHash + ':' + (index + 1),
+    usage: { input_tokens: 5000, output_tokens: 500 }
+  }));
+  // One page needed a more expensive fallback: 0.035814 extra.
+  pageEntries.push({
+    runId, model: 'gpt-6.1-sol', pageKey: fileHash + ':1',
+    usage: { input_tokens: 5002, output_tokens: 2581 }
+  });
+  return pageEntries;
+}
+
+test('regression: repeat 4-page PDF twice does not double the 1-million-page forecast', () => {
+  const entries = [...fourPageCostRun('first'), ...fourPageCostRun('second')];
+  const p = { ...plan, targetPages: 1000000 };
+  const result = summarizeCost(entries, p, 'tiered', {
+    runId: 'second', mode: 'tiered', fileCount: 1, totalPages: 4
+  });
+  assert.ok(Math.abs(result.run.recordedSpendUSD - 0.038814) < 1e-10);
+  assert.ok(Math.abs(result.recordedSpendUSD - 0.077628) < 1e-10);
+  assert.equal(result.run.meteredPages, 4);
+  assert.equal(result.historicalMeteredPages, 8);
+  assert.equal(result.historicalMeteredRuns, 2);
+  assert.equal(result.allTimeMeteredPages, 8);
+  assert.equal(result.plan.forecastBasis, 'latest-run');
+  assert.equal(result.targetForecastSource, 'latest-run');
+  assert.ok(Math.abs(result.targetForecastPerPageUSD - 0.0097035) < 1e-10);
+  assert.ok(Math.abs(result.targetProjectionUSD - 9703.50) < 1e-6);
+});
+
+test('historical average includes repeat scans in both numerator and denominator', () => {
+  const entries = [...fourPageCostRun('first'), ...fourPageCostRun('second')];
+  const result = summarizeCost(entries,
+    { ...plan, targetPages: 1000000, forecastBasis: 'historical' }, 'tiered', {
+      runId: 'second', mode: 'tiered', fileCount: 1, totalPages: 4
+    });
+  assert.equal(result.targetForecastSource, 'historical');
+  assert.equal(result.historicalMeteredPages, 8);
+  assert.ok(Math.abs(result.historicalSpendUSD - 0.077628) < 1e-10);
+  assert.ok(Math.abs(result.targetProjectionUSD - 9703.50) < 1e-6);
+});
+
+test('latest-run and historical forecasts are distinct when earlier processing cost more', () => {
+  const entries = [
+    ...fourPageCostRun('earlier'),
+    ...fourPageCostRun('latest').filter(item => item.model === 'gpt-6-luna')
+  ];
+  const latestRun = { runId: 'latest', mode: 'tiered', totalPages: 4, fileCount: 1 };
+  const latest = summarizeCost(entries, { ...plan, targetPages: 1000000 }, 'tiered', latestRun);
+  const historical = summarizeCost(entries, { ...plan, targetPages: 1000000, forecastBasis: 'historical' }, 'tiered', latestRun);
+  assert.equal(latest.targetForecastSource, 'latest-run');
+  assert.ok(Math.abs(latest.targetProjectionUSD - 750) < 1e-6);
+  assert.equal(historical.targetForecastSource, 'historical');
+  assert.ok(Math.abs(historical.targetProjectionUSD - 5226.75) < 1e-6);
+  assert.equal(historical.historicalMeteredPages, 8);
+  assert.ok(historical.recordedSpendUSD > latest.run.recordedSpendUSD);
+});
+
+test('most recent local run cannot become the selected paid mode unit cost', () => {
+  const entries = fourPageCostRun('old-tiered');
+  const localRun = { runId: 'local', mode: 'local', fileCount: 1, totalPages: 4 };
+  const paid = summarizeCost(entries, { ...plan, targetPages: 1000000 }, 'tiered', localRun);
+  assert.equal(paid.targetForecastSource, 'historical-fallback');
+  assert.ok(Math.abs(paid.targetProjectionUSD - 9703.50) < 1e-6);
+  const local = summarizeCost(entries, { ...plan, targetPages: 1000000 }, 'local', localRun);
+  assert.equal(local.targetForecastSource, 'local');
+  assert.equal(local.targetProjectionUSD, 0);
+});
+
+test('older ledger entries without run IDs remain in spend but not inflated historical rate', () => {
+  const tagged = fourPageCostRun('with-run-id');
+  const older = fourPageCostRun(null);
+  const result = summarizeCost([...tagged, ...older],
+    { ...plan, targetPages: 1000000, forecastBasis: 'historical' }, 'tiered', {
+      runId: 'with-run-id', mode: 'tiered', totalPages: 4, fileCount: 1
+    });
+  assert.ok(Math.abs(result.recordedSpendUSD - 0.077628) < 1e-10);
+  assert.equal(result.historicalMeteredPages, 4);
+  assert.ok(Math.abs(result.legacySpendExcludedUSD - 0.038814) < 1e-10);
+  assert.ok(Math.abs(result.targetProjectionUSD - 9703.50) < 1e-6);
+});
+
+test('historical method falls back to planning when paid page-run sample is absent', () => {
+  const result = summarizeCost([], { ...plan, targetPages: 1000000, forecastBasis: 'historical' }, 'tiered');
+  assert.equal(result.targetForecastSource, 'planning-assumption');
+  assert.equal(result.targetProjectionUSD, 2250);
+});
+
+test('forecast basis saves locally and invalid values return to latest-run default', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'scanauditor-forecast-test-'));
+  t.after(async () => fs.remove(dir));
+  await savePlan(dir, { ...plan, targetPages: 1000000, forecastBasis: 'historical' });
+  const result = await getDashboard(dir, 'tiered');
+  assert.equal(result.plan.forecastBasis, 'historical');
+  assert.equal(result.plan.targetPages, 1000000);
+  assert.equal(validatePlan({ forecastBasis: 'not-a-mode' }).forecastBasis, 'latest-run');
+});
