@@ -75,17 +75,18 @@ test('unresolved unidentified page requires review', () => {
   assert.ok(qa.findings.some(item => item.code === 'UNRESOLVED_PAGE'));
 });
 
-test('medium-confidence hospital number is not confirmed and requires review', () => {
+test('medium-confidence hospital number is informational unless there is separate scan-fidelity evidence', () => {
   const analyzer = new ScanFidelityAnalyzer();
   const result = analyzer.cleanHospitalNumberCandidates([{ value: '123456', confidence: 'medium', evidence: 'one digit unclear' }]);
   assert.equal(result[0].formatValid, true);
   const text = analyzer.combinePageAnalyses([
     page(1, [], [], [], [{ type: 'hospital-number', value: '123456', confidence: 'medium', formatValid: true }])
   ], 1);
-  attachLinkage(text, { unresolvedPages: [1] });
+  attachLinkage(text, { identifiedPages: [1] });
   const qa = analyzer.evaluateQa(text, cleanImages(), cleanMetrics());
-  assert.equal(qa.status, 'review-required');
-  assert.ok(qa.findings.some(item => item.code === 'UNCERTAIN_IDENTIFIER'));
+  assert.equal(qa.status, 'passed');
+  assert.ok(!qa.findings.some(item => item.code === 'UNCERTAIN_IDENTIFIER'));
+  assert.ok(qa.informationalFindings.some(item => item.code === 'UNCERTAIN_IDENTIFIER'));
 });
 
 test('high-confidence organization hospital number is valid', () => {
