@@ -19,6 +19,7 @@ class CloudScanAnalyzer extends ConfiguredAnalyzer {
     this.pageCache = new Map();
     this.runId = crypto.randomBytes(12).toString('hex');
     this.cloudUsagePages = 0;
+    this.fileSequence = 0;
   }
 
   async extractTextWithOCR(imagePath, pageNumber) {
@@ -134,7 +135,10 @@ class CloudScanAnalyzer extends ConfiguredAnalyzer {
     this.pageCache.clear();
     // Stable non-PHI page keys prevent repeated audits from inflating project progress.
     const source = await fs.readFile(file.path);
-    this.runId = crypto.createHash('sha256').update(source).digest('hex');
+    // Different selected files, even identical PDFs, contribute separate
+    // page calls to this run's cost estimate.
+    this.fileSequence += 1;
+    this.runId = crypto.createHash('sha256').update(source).digest('hex') + ':' + this.fileSequence;
     try {
       const result = await super.analyzeFile(file);
       if (result?.analysis?.analysisMetadata) {
