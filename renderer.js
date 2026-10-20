@@ -23,8 +23,7 @@ const apiKeyField = byId('openai-api-key');
 const apiKeyStatus = byId('openai-key-status');
 const hospitalApproved = byId('hospital-approved');
 const costFields = {
-  totalRecords: byId('project-records'),
-  averagePagesPerRecord: byId('average-pages'),
+  targetPages: byId('forecast-target-pages'),
   estimatedInputTokensPerPage: byId('planning-input-tokens'),
   estimatedOutputTokensPerPage: byId('planning-output-tokens'),
   fallbackPercent: byId('fallback-percent')
@@ -366,22 +365,34 @@ function dollar(value, precision = 2) {
   });
 }
 async function refreshCostDashboard() {
-  const mode = analysisMode.value === 'astra' ? 'astra' : 'tiered';
+  const mode = analysisMode.value;
   const dashboard = await window.electronAPI.getCostDashboard(mode);
-  byId('cost-spent').textContent = dollar(dashboard.recordedSpendUSD, dashboard.recordedSpendUSD < 0.01 ? 6 : 2);
-  byId('cost-page').textContent = dollar(dashboard.forecastPerPageUSD, 6);
-  byId('cost-total').textContent = dollar(dashboard.projectedTotalUSD);
-  byId('cost-pages').textContent = Number(dashboard.processedPages).toLocaleString('en-US') +
-    ' / ' + Number(dashboard.plannedPages).toLocaleString('en-US');
-  byId('cost-basis').textContent = (dashboard.costBasis === 'observed-api-usage'
-    ? 'Forecast uses metered API token usage. '
-    : 'Forecast uses planning token assumptions. ') +
-    'Remaining projected: ' + dollar(dashboard.projectedRemainingUSD) +
-    '. Recorded usage is not a reconciled invoice.';
+  const run = dashboard.run;
+  byId('cost-spent').textContent = dollar(dashboard.recordedSpendUSD,
+    dashboard.recordedSpendUSD < 0.01 ? 6 : 2);
+  byId('cost-run-pages').textContent = run ? Number(run.totalPages).toLocaleString('en-US') : '—';
+  byId('cost-run-spent').textContent = run ? dollar(run.recordedSpendUSD, 6) : '—';
+  byId('cost-page').textContent = run ? dollar(run.forecastPerPageUSD, 6) : '—';
+  byId('cost-total').textContent = run ? dollar(run.projectedTotalUSD, 6) : '—';
+  byId('cost-basis').textContent = !run
+    ? 'No run recorded yet. Analyze a PDF to calculate its page-based costs.'
+    : 'Last run: ' + run.fileCount + ' file(s), ' + run.meteredPages + '/' + run.totalPages +
+      ' pages with reported usage. ' +
+      (run.pagesUnknown ? run.pagesUnknown + ' file(s) had unknown page count. ' : '') +
+      (run.costBasis === 'observed-api-usage' ? 'Per-page estimate uses reported API usage. ' : 'Per-page estimate uses planning assumptions. ') +
+      'Mode: ' + run.mode + '.';
+  byId('cost-target-projection').textContent = dashboard.targetPages === null
+    ? 'Optional future-project forecast: none entered. The last-run total is determined from the PDFs.'
+    : 'Optional ' + Number(dashboard.targetPages).toLocaleString('en-US') +
+      '-page forecast for selected mode (' + mode + '): ' +
+      dollar(dashboard.targetProjectionUSD) + ' (' + dashboard.targetCostBasis.replaceAll('-', ' ') +
+      '). This does not alter the last-run total.';
   return dashboard;
 }
 function setPlanInputs(plan) {
-  for (const [key, input] of Object.entries(costFields)) input.value = plan[key];
+  for (const [key, input] of Object.entries(costFields)) {
+    input.value = plan[key] === null ? '' : plan[key];
+  }
 }
 async function configureApiKey() {
   const key = apiKeyField.value;
@@ -401,12 +412,14 @@ async function clearApiKey() {
 }
 async function saveCostSettings() {
   const plan = {};
-  for (const [key, input] of Object.entries(costFields)) plan[key] = Number(input.value);
+  for (const [key, input] of Object.entries(costFields)) {
+    plan[key] = input.value === '' ? null : Number(input.value);
+  }
   try {
     await window.electronAPI.saveCostPlan(plan);
     const dashboard = await refreshCostDashboard();
     setPlanInputs(dashboard.plan);
-    showNotification('Project cost assumptions saved on this computer.', 'success');
+    showNotification('Cost assumptions saved on this computer.', 'success');
   } catch (_) {
     showNotification('Could not save cost settings.', 'error');
   }
