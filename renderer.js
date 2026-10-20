@@ -284,6 +284,36 @@ function createModelDiagnostics(analysis) {
   return wrap;
 }
 
+function createQualityEvidence(analysis) {
+  const evidence = Array.isArray(analysis.imageAnalysis?.qualityEvidence) ? analysis.imageAnalysis.qualityEvidence : [];
+  if (!evidence.length) return null;
+  const section = el('div', 'summary-table');
+  section.appendChild(el('h4', '', 'Model Quality Observations and Evidence'));
+  const table = el('table');
+  const head = el('thead');
+  const labels = ['Page', 'Observation', 'Confidence', 'Region', 'Reason', 'Material content loss?'];
+  const headRow = el('tr');
+  labels.forEach(label => headRow.appendChild(el('th', '', label)));
+  head.appendChild(headRow);
+  table.appendChild(head);
+  const body = el('tbody');
+  for (const item of evidence) {
+    const tr = el('tr');
+    tr.append(
+      el('td', '', item.pageNumber),
+      el('td', '', item.type),
+      el('td', '', item.confidence),
+      el('td', '', item.region),
+      el('td', '', item.reason),
+      el('td', '', item.materialLoss ? 'Suspected' : 'Not established')
+    );
+    body.appendChild(tr);
+  }
+  table.appendChild(body);
+  section.appendChild(table);
+  return section;
+}
+
 function createReviewFeedback(analysis) {
   const hash = analysis.analysisMetadata?.fileSha256;
   const section = el('div', 'review-feedback');
@@ -402,6 +432,8 @@ function createResultCard(result) {
 
   const diagnostics = createModelDiagnostics(analysis);
   if (diagnostics) card.appendChild(diagnostics);
+  const qualityEvidence = createQualityEvidence(analysis);
+  if (qualityEvidence) card.appendChild(qualityEvidence);
 
   const recommendations = createRecommendations(analysis);
   if (recommendations) card.appendChild(recommendations);
