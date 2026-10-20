@@ -354,9 +354,64 @@ function showCloudControls() {
   cloudSettings.hidden = analysisMode.value === 'local';
   refreshCostDashboard().catch(() => {});
 }
+
 function dollar(value, precision = 2) {
   const amount = Number(value);
-  return '
+  return String.fromCharCode(36) + (Number.isFinite(amount) ? amount : 0).toLocaleString('en-US', {
+    minimumFractionDigits: precision, maximumFractionDigits: precision
+  });
+}
+async function refreshCostDashboard() {
+  const mode = analysisMode.value === 'astra' ? 'astra' : 'tiered';
+  const dashboard = await window.electronAPI.getCostDashboard(mode);
+  byId('cost-spent').textContent = dollar(dashboard.recordedSpendUSD, dashboard.recordedSpendUSD < 0.01 ? 6 : 2);
+  byId('cost-page').textContent = dollar(dashboard.forecastPerPageUSD, 6);
+  byId('cost-total').textContent = dollar(dashboard.projectedTotalUSD);
+  byId('cost-pages').textContent = Number(dashboard.processedPages).toLocaleString('en-US') +
+    ' / ' + Number(dashboard.plannedPages).toLocaleString('en-US');
+  byId('cost-basis').textContent = (dashboard.costBasis === 'observed-api-usage'
+    ? 'Forecast uses metered API token usage. '
+    : 'Forecast uses planning token assumptions. ') +
+    'Remaining projected: ' + dollar(dashboard.projectedRemainingUSD) +
+    '. Recorded usage is not a reconciled invoice.';
+  return dashboard;
+}
+function setPlanInputs(plan) {
+  for (const [key, input] of Object.entries(costFields)) input.value = plan[key];
+}
+async function configureApiKey() {
+  const key = apiKeyField.value;
+  try {
+    await window.electronAPI.setOpenAIKey(key);
+    apiKeyField.value = '';
+    apiKeyStatus.textContent = 'API key configured for this session. Not saved to disk.';
+    showNotification('OpenAI API key configured for this session.', 'success');
+  } catch (_) {
+    showNotification('Could not configure API key. Check the entered value.', 'error');
+  }
+}
+async function clearApiKey() {
+  await window.electronAPI.clearOpenAIKey();
+  apiKeyField.value = '';
+  apiKeyStatus.textContent = 'No API key configured. The key is not saved to disk.';
+}
+async function saveCostSettings() {
+  const plan = {};
+  for (const [key, input] of Object.entries(costFields)) plan[key] = Number(input.value);
+  try {
+    await window.electronAPI.saveCostPlan(plan);
+    const dashboard = await refreshCostDashboard();
+    setPlanInputs(dashboard.plan);
+    showNotification('Project cost assumptions saved on this computer.', 'success');
+  } catch (_) {
+    showNotification('Could not save cost settings.', 'error');
+  }
+}
+analysisMode.addEventListener('change', showCloudControls);
+byId('save-openai-key').addEventListener('click', configureApiKey);
+byId('clear-openai-key').addEventListener('click', clearApiKey);
+byId('save-cost-plan').addEventListener('click', saveCostSettings);
+selectFilesBtn.addEventListener('click', handleFileSelection);
 clearFilesBtn.addEventListener('click', () => {
   selectedFiles = [];
   updateFileList();
