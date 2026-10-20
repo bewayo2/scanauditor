@@ -27,7 +27,13 @@ The dashboard shows:
 
 Example: one 12-page cloud PDF uses exactly 12 pages for its own total. The app never multiplies that by 100,000 records automatically.
 
-An **optional future target (pages)** may be entered when you want to extrapolate the expected price of many *future pages*. Leaving it blank displays no future-project estimate. This separate target does not change the last-run cost or page count. Mode-specific future projections use the selected OpenAI mode's observed usage when available, otherwise planning token assumptions. A local-only run has $0 OpenAI API cost; electricity/hardware costs are not tracked.
+An **optional future target (pages)** may be entered when you want to extrapolate the expected price of many *future pages*. Leaving it blank displays no future-project estimate. This separate target does not change the last-run cost or page count.
+
+**Future forecast method:** By default the forecast uses the **latest matching run's measured cost per metered page**. The selector can switch to **Historical average across runs**. Historical average divides the selected OpenAI mode's total metered spending across run-tagged API requests by the number of distinct **(run ID, page)** pairs with usage, *not* by the number of unique PDF pages. This correctly counts a four-page PDF scanned twice as eight paid page-runs, while counting Luna and Sol calls on the same page in a single run only once in the denominator. Total cumulative spending is unchanged by this selection.
+
+If the latest run belongs to another mode (e.g., local only or Astra), the latest-run method falls back to that selected mode's historical average. If no comparable API page-run usage is available, it uses the planning token assumptions and labels the estimate accordingly. Legacy ledger entries without a run ID remain included in lifetime spend but are excluded from historical per-page rates because their repeat-scan counts cannot be reconstructed reliably. A local-only future forecast has $0 OpenAI API cost; electricity/hardware costs are not tracked.
+
+**Worked example:** If a four-page tiered run cost $0.038814, its measured cost is $0.0097035 per page and an optional 1,000,000-page forecast based on that run is **$9,703.50**, not $18,999.75. A repeat run incurs additional actual spending but must not double the cost-per-page denominator unfairly.
 
 Usage is saved to an append-only non-PHI JSONL ledger within Electron's local userData/cost-tracker directory. Records contain model ID, token counts, a document hash/page key and a random run identifier, but no filename, API key, patient identifiers, or OCR text. An additional runs.jsonl file contains only run ID, date, mode, file count, known page count and unknown-page count. The API key remains memory-only.
 
