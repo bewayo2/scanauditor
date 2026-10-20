@@ -31,7 +31,10 @@ class CloudScanAnalyzer extends ConfiguredAnalyzer {
       best = first;
     } catch (error) {
       firstError = error;
-      if (error.response?.status === 401 || error.response?.status === 403) throw error;
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        this.setStage(pageNumber, 'ocr', { status: 'failed', attempts: 1, failureCategory: 'authentication' });
+        throw error;
+      }
     }
     let fallbackAttempted = false;
     if (this.fallbackModel && (!best || needsSecondPass(best))) {
@@ -41,7 +44,12 @@ class CloudScanAnalyzer extends ConfiguredAnalyzer {
         // Sol is authoritative if it produced usable page text; otherwise retain Luna's output.
         if (upgraded?.ocrText?.trim() || !best) best = upgraded;
       } catch (error) {
-        if (!best) throw error;
+        if (!best) {
+          this.setStage(pageNumber, 'ocr', {
+            status: 'failed', attempts: 2, failureCategory: this.classifyInferenceError(error)
+          });
+          throw error;
+        }
         this.log('openai_fallback_failed', { pageNumber, failureCategory: this.classifyInferenceError(error) });
       }
     }
@@ -124,7 +132,9 @@ class CloudScanAnalyzer extends ConfiguredAnalyzer {
 
   async analyzeFile(file) {
     this.pageCache.clear();
-    this.runId = crypto.randomBytes(12).toString('hex');
+    // Stable non-PHI page keys prevent repeated audits from inflating project progress.
+    const source = await fs.readFile(file.path);
+    this.runId = crypto.createHash('sha256').update(source).digest('hex');
     try {
       const result = await super.analyzeFile(file);
       if (result?.analysis?.analysisMetadata) {
