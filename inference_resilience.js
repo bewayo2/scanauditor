@@ -56,15 +56,17 @@ async function runWithRetries({ attempts, delayMs = 0, operation, acceptResult, 
 function buildLinkage(entries) {
   const identifiedPages = entries.filter(item => item.classification === 'identified').map(item => item.pageNumber);
   const continuationPages = entries.filter(item => item.classification === 'continuation').map(item => item.pageNumber);
+  const documentStartPages = entries.filter(item => item.classification === 'document-start').map(item => item.pageNumber);
   const unresolvedPages = entries.filter(item => item.classification === 'unresolved').map(item => item.pageNumber);
   const failedPages = entries.filter(item => item.classification === 'failed').map(item => item.pageNumber);
-  const resolvedPages = identifiedPages.length + continuationPages.length;
+  const resolvedPages = identifiedPages.length + continuationPages.length + documentStartPages.length;
   const totalPages = entries.length;
   return {
     entries,
     totalPages,
     identifiedPages,
     continuationPages,
+    documentStartPages,
     unresolvedPages,
     failedPages,
     resolvedPages,

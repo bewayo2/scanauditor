@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setOpenAIKey: key => ipcRenderer.invoke('set-openai-key', key),
   clearOpenAIKey: () => ipcRenderer.invoke('clear-openai-key'),
   getOpenAIKeyStatus: () => ipcRenderer.invoke('get-openai-key-status'),
+  getReviewDisposition: hash => ipcRenderer.invoke('get-review-disposition', hash),
+  saveReviewDisposition: payload => ipcRenderer.invoke('save-review-disposition', payload),
   getCostDashboard: mode => ipcRenderer.invoke('get-cost-dashboard', mode),
   saveCostPlan: plan => ipcRenderer.invoke('save-cost-plan', plan)
 });

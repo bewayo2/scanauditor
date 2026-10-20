@@ -164,6 +164,41 @@ test('explicit four-page form pagination resolves continuation pages without mod
   assert.equal(analyzer.getDiagnostic(3).continuation.method, 'explicit-pagination');
 });
 
+test('four-page form without confirmed identifiers uses an explicit document start, not four continuations', async () => {
+  class StructuralAnalyzer extends ResilientAnalyzer {
+    constructor() { super({ auditConfig: auditConfig() }); this.modelCalls = 0; }
+    async generateStructured() { this.modelCalls += 1; throw new Error('model not needed'); }
+    log() {}
+  }
+  const analyzer = new StructuralAnalyzer();
+  const contexts = [1, 2, 3, 4].map(n => ({
+    pageNumber: n, ocrText: 'Emergency Room Record Page ' + n + ' of 4',
+    analysis: page(n)
+  }));
+  const linkage = await analyzer.classifyContinuationPages(contexts, 'fixture.pdf');
+  assert.deepEqual(linkage.documentStartPages, [1]);
+  assert.deepEqual(linkage.continuationPages, [2, 3, 4]);
+  assert.deepEqual(linkage.unresolvedPages, []);
+  assert.equal(linkage.resolvedPercentage, 100);
+  assert.equal(analyzer.modelCalls, 0);
+});
+
+test('first PDF page cannot be treated as a prior-page continuation by a model', async () => {
+  class ConfusedAnalyzer extends ResilientAnalyzer {
+    constructor() { super({ auditConfig: auditConfig() }); }
+    async generateStructured() {
+      return { classification: 'continuation', confidence: 'high', direction: 'previous', evidence: 'mistake' };
+    }
+    log() {}
+  }
+  const analyzer = new ConfusedAnalyzer();
+  const linkage = await analyzer.classifyContinuationPages([{
+    pageNumber: 1, ocrText: 'Independent form with no page number', analysis: page(1)
+  }], 'fixture.pdf');
+  assert.deepEqual(linkage.continuationPages, []);
+  assert.deepEqual(linkage.unresolvedPages, [1]);
+});
+
 test('technical OCR failures are reported separately from document uncertainty', () => {
   const analyzer = new ResilientAnalyzer({ auditConfig: auditConfig() });
   analyzer.setStage(1, 'ocr', { status: 'failed', attempts: 3, failureCategory: 'timeout' });

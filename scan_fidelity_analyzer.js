@@ -8,6 +8,7 @@ const pdfParse = require('pdf-parse');
 const ComprehensiveAnalyzer = require('./comprehensive_analyzer');
 const { AUDIT_CONFIG } = require('./audit_config');
 const packageJson = require('./package.json');
+const { qualityFindings } = require('./quality_policy');
 
 const CONFIDENCE_LEVELS = new Set(['high', 'medium', 'low']);
 
@@ -555,6 +556,7 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
 
   evaluateQa(textAnalysis, imageAnalysis, metrics) {
     const findings = [];
+    const informationalFindings = [];
     const coverage = textAnalysis.identifierCoverage;
     const linkage = textAnalysis.pageLinkage;
 
@@ -562,20 +564,20 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
     if (!imageAnalysis.complete) this.addFinding(findings, 'IMAGE_ANALYSIS_INCOMPLETE', 'Visual quality analysis did not complete for every page.', imageAnalysis.failedBatches.flat());
     if (!metrics.complete) this.addFinding(findings, 'IMAGE_METRICS_INCOMPLETE', 'Deterministic image metrics could not be calculated for every page.');
     if (linkage.unresolvedPages.length) this.addFinding(findings, 'UNRESOLVED_PAGE', 'One or more pages contain no confirmed identifier and could not be confidently classified as continuation pages. Compare with the paper source if available.', linkage.unresolvedPages);
-    if (textAnalysis.uncertainFindings.length) this.addFinding(findings, 'UNCERTAIN_IDENTIFIER', 'One or more patient identifiers could not be extracted with high confidence. Compare the affected pages with the paper source.', textAnalysis.uncertainFindings.map(item => item.page));
+    if (textAnalysis.uncertainFindings.length) this.addFinding(informationalFindings, 'UNCERTAIN_IDENTIFIER', 'Some handwritten or printed identifiers could not be read confidently. This does not itself demonstrate a scanning defect.', textAnalysis.uncertainFindings.map(item => item.page));
     if (textAnalysis.multiplePatients?.detected) this.addFinding(findings, 'MULTIPLE_PATIENT_IDENTIFIERS', 'More than one confirmed patient name or hospital number appears in the digital record. Compare with the source record.', textAnalysis.multiplePatients.pages || []);
-    if (textAnalysis.dateIssues?.mismatches?.length) this.addFinding(findings, 'DATE_ANOMALY', 'A same-page admission/discharge date anomaly appears in the digital record. This may reflect the source paper record rather than a digitization error.', textAnalysis.dateIssues.mismatches.flatMap(item => item.pages || []));
+    if (textAnalysis.dateIssues?.mismatches?.length) this.addFinding(informationalFindings, 'DATE_ANOMALY', 'Document dates appear inconsistent. A chronology issue alone is not evidence of a digitization defect.', textAnalysis.dateIssues.mismatches.flatMap(item => item.pages || []));
 
-    const qualityChecks = [
-      ['UNREADABLE_PAGE', imageAnalysis.unreadablePages, 'One or more pages are not reliably readable in the digital copy. Compare with the paper source.'],
-      ['POSSIBLE_CUTOFF', imageAnalysis.cutoffPages, 'One or more pages appear cut off. Compare with the paper source; rescan only if digitization introduced the defect.'],
-      ['POSSIBLE_INCOMPLETE_PAGE', imageAnalysis.incompletePages, 'One or more pages appear incomplete. Compare with the paper source; rescan only if digitization introduced the defect.'],
-      ['BLURRY_PAGE', imageAnalysis.blurryPages, 'One or more pages appear blurry or low quality. Compare with the paper source.'],
-      ['DARK_PAGE', imageAnalysis.darkPages, 'One or more pages appear unusually dark. Compare with the paper source.'],
-      ['LIGHT_PAGE', imageAnalysis.lightPages, 'One or more pages appear unusually light or washed out. Compare with the paper source.'],
-      ['ORIENTATION_ISSUE', [...imageAnalysis.upsideDownPages, ...imageAnalysis.sidewaysPages, ...imageAnalysis.misalignedPages], 'One or more pages have an orientation or alignment issue that should be reviewed.']
-    ];
-    for (const [code, pages, message] of qualityChecks) if (pages?.length) this.addFinding(findings, code, message, pages);
+    const quality = qualityFindings(imageAnalysis);
+    // Present all pages for a finding type in one row instead of one row per page.
+    for (const [items, destination] of [[quality.review, findings], [quality.informational, informationalFindings]]) {
+      const grouped = new Map();
+      for (const item of items) {
+        if (!grouped.has(item.code)) grouped.set(item.code, { message: item.message, pages: [] });
+        grouped.get(item.code).pages.push(...item.pages);
+      }
+      for (const [code, group] of grouped) this.addFinding(destination, code, group.message, group.pages);
+    }
 
     if (imageAnalysis.exactDuplicateGroups.length) this.addFinding(findings, 'EXACT_DUPLICATE', 'Identical digital page images were found. Verify whether the duplication also exists in the paper source.', imageAnalysis.exactDuplicateGroups.flat());
     if (imageAnalysis.possibleDuplicateGroups.length || imageAnalysis.visionDuplicateGroups.length) {
@@ -590,19 +592,20 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
         : 'One or more automated scan-fidelity findings require manual review.';
 
     const sourceComparisonCodes = new Set([
-      'UNRESOLVED_PAGE', 'UNCERTAIN_IDENTIFIER', 'MULTIPLE_PATIENT_IDENTIFIERS', 'DATE_ANOMALY',
+      'UNRESOLVED_PAGE', 'MULTIPLE_PATIENT_IDENTIFIERS',
       'UNREADABLE_PAGE', 'POSSIBLE_CUTOFF', 'POSSIBLE_INCOMPLETE_PAGE', 'BLURRY_PAGE', 'DARK_PAGE',
       'LIGHT_PAGE', 'ORIENTATION_ISSUE', 'EXACT_DUPLICATE', 'POSSIBLE_DUPLICATE'
     ]);
     const comparePages = findings.filter(item => sourceComparisonCodes.has(item.code)).flatMap(item => item.pages || []);
     const recommendations = {
-      manualReview: findings.map(item => item.message),
+      manualReview: [...new Set(findings.map(item => item.message))],
+      informational: [...new Set(informationalFindings.map(item => item.message))],
       compareWithSource: comparePages.length ? [`Compare flagged page(s) ${[...new Set(comparePages)].sort((a, b) => a - b).join(', ')} with the paper source if available.`] : [],
       rescanning: findings.some(item => ['UNREADABLE_PAGE', 'POSSIBLE_CUTOFF', 'POSSIBLE_INCOMPLETE_PAGE', 'BLURRY_PAGE', 'DARK_PAGE', 'LIGHT_PAGE', 'ORIENTATION_ISSUE'].includes(item.code))
         ? ['If comparison confirms the digital copy introduced a quality defect, rescan the affected page(s).']
         : []
     };
-    return { status, reason, findings, recommendations };
+    return { status, reason, findings, informationalFindings, recommendations };
   }
 
   createSummaryTable(qaAssessment) {
@@ -618,6 +621,7 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
     return {
       fileInformation: { fileName, analysisDate: metadata.analysisDate, totalPages },
       summaryTable: this.createSummaryTable(qaAssessment),
+      informationalTable: this.createSummaryTable({ findings: qaAssessment.informationalFindings || [] }),
       patientIdentifiers: textAnalysis.patientIdentifiers,
       identifierCoverage: textAnalysis.identifierCoverage,
       pageLinkage: textAnalysis.pageLinkage,
@@ -636,10 +640,11 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
         misalignedPages: imageAnalysis.misalignedPages,
         exactDuplicateGroups: imageAnalysis.exactDuplicateGroups,
         possibleDuplicateGroups: imageAnalysis.possibleDuplicateGroups,
-        deterministicMetrics: metrics.pages
+        deterministicMetrics: metrics.pages,
+        qualityEvidence: imageAnalysis.qualityEvidence || []
       },
       recommendations: qaAssessment.recommendations,
-      qaAssessment: { status: qaAssessment.status, reason: qaAssessment.reason, findings: qaAssessment.findings },
+      qaAssessment: { status: qaAssessment.status, reason: qaAssessment.reason, findings: qaAssessment.findings, informationalFindings: qaAssessment.informationalFindings || [] },
       analysisMetadata: metadata,
       priorityIssues: qaAssessment.findings.map(item => item.message)
     };

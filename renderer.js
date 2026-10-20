@@ -248,6 +248,124 @@ function createIssuesTable(issues) {
   return section;
 }
 
+function createInformationalTable(items) {
+  const section = createIssuesTable(items);
+  const heading = section.querySelector('h4');
+  if (heading) heading.textContent = 'Informational Observations (not automatic review findings)';
+  return section;
+}
+
+function createModelDiagnostics(analysis) {
+  const rows = Array.isArray(analysis.processingDiagnostics) ? analysis.processingDiagnostics : [];
+  if (!rows.length) return null;
+  const wrap = el('div', 'summary-table');
+  wrap.appendChild(el('h4', '', 'Page Processing Diagnostics'));
+  const table = el('table');
+  const thead = el('thead');
+  const header = el('tr');
+  ['Page', 'Model selected', 'Sol fallback', 'Continuation', 'OCR status'].forEach(label => header.appendChild(el('th', '', label)));
+  thead.appendChild(header);
+  table.appendChild(thead);
+  const tbody = el('tbody');
+  for (const row of rows) {
+    const tr = el('tr');
+    const cloud = row.cloudModels || {};
+    tr.append(
+      el('td', '', row.pageNumber || ''),
+      el('td', '', cloud.selectedModel || analysis.analysisMetadata?.models?.ocr || 'Local model'),
+      el('td', '', cloud.fallbackUsed === true ? 'Yes' : cloud.fallbackUsed === false ? 'No' : 'N/A'),
+      el('td', '', row.continuation?.method || '—'),
+      el('td', '', row.ocr?.status || '—')
+    );
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  return wrap;
+}
+
+function createQualityEvidence(analysis) {
+  const evidence = Array.isArray(analysis.imageAnalysis?.qualityEvidence) ? analysis.imageAnalysis.qualityEvidence : [];
+  if (!evidence.length) return null;
+  const section = el('div', 'summary-table');
+  section.appendChild(el('h4', '', 'Model Quality Observations and Evidence'));
+  const table = el('table');
+  const head = el('thead');
+  const labels = ['Page', 'Observation', 'Confidence', 'Region', 'Reason', 'Material content loss?'];
+  const headRow = el('tr');
+  labels.forEach(label => headRow.appendChild(el('th', '', label)));
+  head.appendChild(headRow);
+  table.appendChild(head);
+  const body = el('tbody');
+  for (const item of evidence) {
+    const tr = el('tr');
+    tr.append(
+      el('td', '', item.pageNumber),
+      el('td', '', item.type),
+      el('td', '', item.confidence),
+      el('td', '', item.region),
+      el('td', '', item.reason),
+      el('td', '', item.materialLoss ? 'Suspected' : 'Not established')
+    );
+    body.appendChild(tr);
+  }
+  table.appendChild(body);
+  section.appendChild(table);
+  return section;
+}
+
+function createReviewFeedback(analysis) {
+  const hash = analysis.analysisMetadata?.fileSha256;
+  const section = el('div', 'review-feedback');
+  section.appendChild(el('h4', '', 'Human Review Outcome'));
+  section.appendChild(el('p', 'small-note', 'Your assessment is stored separately from the automated QA status. Paper-confirmed outcomes require an actual comparison with the paper source.'));
+  if (!/^[0-9a-f]{64}$/i.test(String(hash || ''))) {
+    section.appendChild(el('p', 'small-note', 'A file hash was not available; this result cannot be saved to the review log.'));
+    return section;
+  }
+  const selector = el('select', 'review-outcome-select');
+  const options = [
+    ['', 'Select a review outcome'],
+    ['no-defect-digital', 'No digitization defect seen — digital inspection'],
+    ['model-false-positive', 'Suspected model false positive — digital inspection'],
+    ['source-issue-confirmed', 'Source-paper issue confirmed — paper compared'],
+    ['scan-defect-confirmed', 'Scanning defect confirmed — paper compared'],
+    ['inconclusive', 'Inconclusive — further review needed']
+  ];
+  for (const [value, label] of options) {
+    const option = el('option', '', label);
+    option.value = value;
+    selector.appendChild(option);
+  }
+  const save = el('button', 'btn btn-secondary', 'Save Review Outcome');
+  save.type = 'button';
+  const feedback = el('p', 'small-note', 'No human review outcome recorded for this file.');
+  save.addEventListener('click', async () => {
+    if (!selector.value) {
+      showNotification('Select an outcome first.', 'warning');
+      return;
+    }
+    try {
+      const saved = await window.electronAPI.saveReviewDisposition({ fileSha256: hash, outcome: selector.value });
+      analysis.manualDisposition = saved;
+      feedback.textContent = 'Saved: ' + options.find(([key]) => key === saved.outcome)[1] + ' (' + saved.comparisonBasis + ').';
+      showNotification('Review outcome saved locally.', 'success');
+    } catch (_) {
+      showNotification('Could not save the review outcome.', 'error');
+    }
+  });
+  window.electronAPI.getReviewDisposition(hash).then(existing => {
+    if (!existing) return;
+    selector.value = existing.outcome;
+    analysis.manualDisposition = existing;
+    feedback.textContent = 'Previously recorded: ' +
+      (options.find(([key]) => key === existing.outcome)?.[1] || existing.outcome) +
+      ' (' + existing.comparisonBasis + ').';
+  }).catch(() => {});
+  section.append(selector, save, feedback);
+  return section;
+}
+
 function createRecommendations(analysis) {
   const recommendations = analysis.recommendations || {};
   const groups = [
@@ -285,6 +403,7 @@ function createResultCard(result) {
     createDetail('Total Pages', analysis.fileInformation?.totalPages ?? 0),
     createDetail('Identifier Coverage', Number.isFinite(coverage.coveragePercentage) ? `${coverage.coveragePercentage.toFixed(1)}%` : '0.0%'),
     createDetail('Continuation Pages', Array.isArray(linkage.continuationPages) ? linkage.continuationPages.length : 0),
+    createDetail('Document Start Pages', Array.isArray(linkage.documentStartPages) ? linkage.documentStartPages.length : 0),
     createDetail('Unresolved Pages', Array.isArray(linkage.unresolvedPages) ? linkage.unresolvedPages.length : 0),
     createDetail('Pages Failed', coverage.pagesFailed ?? 0),
     createDetail('QA Status', qaLabel(qa.status))
@@ -308,8 +427,17 @@ function createResultCard(result) {
   if (issues.length) card.appendChild(createIssuesTable(issues));
   else card.appendChild(el('div', 'finding-item positive', 'No configured automated QA finding requires manual review.'));
 
+  const informational = analysis.informationalTable || [];
+  if (informational.length) card.appendChild(createInformationalTable(informational));
+
+  const diagnostics = createModelDiagnostics(analysis);
+  if (diagnostics) card.appendChild(diagnostics);
+  const qualityEvidence = createQualityEvidence(analysis);
+  if (qualityEvidence) card.appendChild(qualityEvidence);
+
   const recommendations = createRecommendations(analysis);
   if (recommendations) card.appendChild(recommendations);
+  card.appendChild(createReviewFeedback(analysis));
   return card;
 }
 
