@@ -569,8 +569,15 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
     if (textAnalysis.dateIssues?.mismatches?.length) this.addFinding(informationalFindings, 'DATE_ANOMALY', 'Document dates appear inconsistent. A chronology issue alone is not evidence of a digitization defect.', textAnalysis.dateIssues.mismatches.flatMap(item => item.pages || []));
 
     const quality = qualityFindings(imageAnalysis);
-    for (const signal of quality.review) this.addFinding(findings, signal.code, signal.message, signal.pages);
-    for (const signal of quality.informational) this.addFinding(informationalFindings, signal.code, signal.message, signal.pages);
+    // Present all pages for a finding type in one row instead of one row per page.
+    for (const [items, destination] of [[quality.review, findings], [quality.informational, informationalFindings]]) {
+      const grouped = new Map();
+      for (const item of items) {
+        if (!grouped.has(item.code)) grouped.set(item.code, { message: item.message, pages: [] });
+        grouped.get(item.code).pages.push(...item.pages);
+      }
+      for (const [code, group] of grouped) this.addFinding(destination, code, group.message, group.pages);
+    }
 
     if (imageAnalysis.exactDuplicateGroups.length) this.addFinding(findings, 'EXACT_DUPLICATE', 'Identical digital page images were found. Verify whether the duplication also exists in the paper source.', imageAnalysis.exactDuplicateGroups.flat());
     if (imageAnalysis.possibleDuplicateGroups.length || imageAnalysis.visionDuplicateGroups.length) {
@@ -633,7 +640,8 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
         misalignedPages: imageAnalysis.misalignedPages,
         exactDuplicateGroups: imageAnalysis.exactDuplicateGroups,
         possibleDuplicateGroups: imageAnalysis.possibleDuplicateGroups,
-        deterministicMetrics: metrics.pages
+        deterministicMetrics: metrics.pages,
+        qualityEvidence: imageAnalysis.qualityEvidence || []
       },
       recommendations: qaAssessment.recommendations,
       qaAssessment: { status: qaAssessment.status, reason: qaAssessment.reason, findings: qaAssessment.findings, informationalFindings: qaAssessment.informationalFindings || [] },
