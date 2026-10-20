@@ -24,6 +24,7 @@ const apiKeyStatus = byId('openai-key-status');
 const hospitalApproved = byId('hospital-approved');
 const costFields = {
   targetPages: byId('forecast-target-pages'),
+  forecastBasis: byId('forecast-basis'),
   estimatedInputTokensPerPage: byId('planning-input-tokens'),
   estimatedOutputTokensPerPage: byId('planning-output-tokens'),
   fallbackPercent: byId('fallback-percent')
@@ -509,12 +510,24 @@ async function refreshCostDashboard() {
       (run.pagesUnknown ? run.pagesUnknown + ' file(s) had unknown page count. ' : '') +
       (run.costBasis === 'observed-api-usage' ? 'Per-page estimate uses reported API usage. ' : 'Per-page estimate uses planning assumptions. ') +
       'Mode: ' + run.mode + '.';
+  const forecastSources = {
+    'latest-run': 'latest matching scan run (' + (run?.meteredPages || 0) + ' metered pages)',
+    'historical': 'historical average (' + dashboard.historicalMeteredPages +
+      ' metered page-runs across ' + dashboard.historicalMeteredRuns + ' runs; repeated scans counted)',
+    'historical-fallback': 'historical average (no metered latest run for this model mode)',
+    'planning-assumption': 'token-based planning assumptions (no comparable metered scans)',
+    'local': 'no paid API calls in local mode'
+  };
+  const sourceText = forecastSources[dashboard.targetForecastSource] || 'estimated API usage';
   byId('cost-target-projection').textContent = dashboard.targetPages === null
-    ? 'Optional future-project forecast: none entered. The last-run total is determined from the PDFs.'
+    ? 'Optional future-project forecast: none entered. Last-run totals use the PDFs analyzed.'
     : 'Optional ' + Number(dashboard.targetPages).toLocaleString('en-US') +
-      '-page forecast for selected mode (' + mode + '): ' +
-      dollar(dashboard.targetProjectionUSD) + ' (' + dashboard.targetCostBasis.replaceAll('-', ' ') +
-      '). This does not alter the last-run total.';
+      '-page forecast (' + mode + '): ' + dollar(dashboard.targetProjectionUSD) +
+      ' at ' + dollar(dashboard.targetForecastPerPageUSD, 8) + '/page using ' +
+      sourceText + '. Cumulative API spending is tracked separately.' +
+      (dashboard.legacySpendExcludedUSD > 0
+        ? ' Usage from older untagged runs remains in cumulative spend but cannot be used to calculate a reliable historical per-page average.'
+        : '');
   return dashboard;
 }
 function setPlanInputs(plan) {
@@ -541,7 +554,8 @@ async function clearApiKey() {
 async function saveCostSettings() {
   const plan = {};
   for (const [key, input] of Object.entries(costFields)) {
-    plan[key] = input.value === '' ? null : Number(input.value);
+    plan[key] = key === 'forecastBasis' ? input.value
+      : input.value === '' ? null : Number(input.value);
   }
   try {
     await window.electronAPI.saveCostPlan(plan);

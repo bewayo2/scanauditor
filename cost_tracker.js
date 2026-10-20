@@ -13,6 +13,7 @@ const MODEL_PRICING = Object.freeze({
 });
 const DEFAULT_PLAN = Object.freeze({
   targetPages: null,
+  forecastBasis: 'latest-run',
   estimatedInputTokensPerPage: 5000,
   estimatedOutputTokensPerPage: 500,
   fallbackPercent: 10
@@ -24,6 +25,8 @@ function finiteRange(value, fallback, min, max) {
 }
 function validatePlan(value = {}) {
   return {
+    // Latest matching run is preferred; history counts scans, not unique documents.
+    forecastBasis: value.forecastBasis === 'historical' ? 'historical' : 'latest-run',
     // Optional extrapolation, never the page count of the current run.
     targetPages: value.targetPages === '' || value.targetPages == null ||
       !Number.isSafeInteger(Number(value.targetPages)) ||
@@ -53,31 +56,49 @@ function summarizeCost(entries, plan, mode = 'tiered', lastRun = null) {
   const p = validatePlan(plan);
   const allPages = new Set();
   const runPages = new Set();
-  const selectedModePages = new Set();
+  const historicalPages = new Set();
+  const historicalRunIds = new Set();
   const selectedModeModels = mode === 'astra'
     ? new Set(['gpt-6-astra'])
     : mode === 'tiered' ? new Set(['gpt-6-luna', 'gpt-6.1-sol']) : new Set();
   const modelSpend = {};
   let recordedSpendUSD = 0;
   let runSpendUSD = 0;
-  let selectedModeSpendUSD = 0;
+  let historicalSpendUSD = 0;
+  let legacySpendExcludedUSD = 0;
   let chargedCalls = 0;
+
   for (const entry of entries) {
     if (!entry || !Object.hasOwn(MODEL_PRICING, entry.model)) continue;
     const cost = usageCost(entry.model, entry.usage);
     recordedSpendUSD += cost;
     chargedCalls += 1;
     modelSpend[entry.model] = (modelSpend[entry.model] || 0) + cost;
-    if (entry.pageKey) allPages.add(entry.pageKey);
+
+    // A page scanned on two occasions is two paid page-processing events.
+    // Deduplicate Luna/Sol calls for the SAME page WITHIN a run, not between runs.
+    const runId = typeof entry.runId === 'string' && entry.runId ? entry.runId : null;
+    const pageKey = typeof entry.pageKey === 'string' && entry.pageKey ? entry.pageKey : null;
+    if (pageKey) allPages.add(JSON.stringify([runId || 'legacy', pageKey]));
     if (selectedModeModels.has(entry.model)) {
-      selectedModeSpendUSD += cost;
-      if (entry.pageKey) selectedModePages.add(entry.pageKey);
+      if (runId) {
+        historicalSpendUSD += cost;
+        if (pageKey) {
+          historicalPages.add(JSON.stringify([runId, pageKey]));
+          historicalRunIds.add(runId);
+        }
+      } else {
+        // Older usage rows cannot be assigned reliably to an individual run.
+        // Include their dollars in lifetime spend, but not an observed per-page forecast.
+        legacySpendExcludedUSD += cost;
+      }
     }
-    if (lastRun && entry.runId && entry.runId === lastRun.runId) {
+    if (lastRun && runId && runId === lastRun.runId) {
       runSpendUSD += cost;
-      if (entry.pageKey) runPages.add(entry.pageKey);
+      if (pageKey) runPages.add(pageKey);
     }
   }
+
   const knownPages = lastRun && Number.isSafeInteger(lastRun.totalPages) && lastRun.totalPages >= 0
     ? lastRun.totalPages : 0;
   const activeMode = lastRun?.mode || 'local';
@@ -90,12 +111,25 @@ function summarizeCost(entries, plan, mode = 'tiered', lastRun = null) {
   const unmeteredRunPages = Math.max(0, knownPages - meteredRunPages);
   const runProjectedTotalUSD = runSpendUSD + unmeteredRunPages * runPerPage;
 
-  // An OPTIONAL future-page extrapolation is separate from the real scanned run.
-  // Prefer the selected mode's actual observed price rather than unrelated model usage.
-  const selectedObserved = selectedModePages.size
-    ? selectedModeSpendUSD / selectedModePages.size : null;
-  const targetPerPage = mode === 'local' ? 0
-    : selectedObserved === null ? planningPerPage(p, mode) : selectedObserved;
+  // Never use a local/Astra run to set Luna/Sol's "latest run" price (or vice versa).
+  const matchingLatestPerPage = lastRun?.mode === mode ? observedRunPerPage : null;
+  const historicalPerPage = historicalPages.size
+    ? historicalSpendUSD / historicalPages.size : null;
+  let targetPerPage;
+  let targetForecastSource;
+  if (mode === 'local') {
+    targetPerPage = 0;
+    targetForecastSource = 'local';
+  } else if (p.forecastBasis === 'latest-run' && matchingLatestPerPage !== null) {
+    targetPerPage = matchingLatestPerPage;
+    targetForecastSource = 'latest-run';
+  } else if (historicalPerPage !== null) {
+    targetPerPage = historicalPerPage;
+    targetForecastSource = p.forecastBasis === 'historical' ? 'historical' : 'historical-fallback';
+  } else {
+    targetPerPage = planningPerPage(p, mode);
+    targetForecastSource = 'planning-assumption';
+  }
 
   return {
     plan: p,
@@ -112,10 +146,17 @@ function summarizeCost(entries, plan, mode = 'tiered', lastRun = null) {
       projectedTotalUSD: runProjectedTotalUSD,
       costBasis: observedRunPerPage === null ? 'planning-assumption' : 'observed-api-usage'
     } : null,
+    historicalMeteredPages: historicalPages.size,
+    historicalMeteredRuns: historicalRunIds.size,
+    historicalSpendUSD,
+    historicalPerPageUSD: historicalPerPage,
+    legacySpendExcludedUSD,
     targetPages: p.targetPages,
     targetForecastPerPageUSD: targetPerPage,
     targetProjectionUSD: p.targetPages === null ? null : targetPerPage * p.targetPages,
-    targetCostBasis: selectedObserved === null ? 'planning-assumption' : 'observed-api-usage',
+    targetForecastSource,
+    targetCostBasis: ['latest-run', 'historical', 'historical-fallback'].includes(targetForecastSource)
+      ? 'observed-api-usage' : 'planning-assumption',
     disclaimer: 'API usage estimates only, not the provider invoice. Excludes unmetered failed requests, taxes, special processing tiers and other account activity.'
   };
 }
