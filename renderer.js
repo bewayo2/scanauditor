@@ -17,6 +17,17 @@ const loadingOverlay = byId('loading-overlay');
 const backendStatus = byId('backend-status');
 const ollamaStatus = byId('ollama-status');
 const exportButton = byId('export-excel-btn');
+const analysisMode = byId('analysis-mode');
+const cloudSettings = byId('cloud-settings');
+const apiKeyField = byId('openai-api-key');
+const apiKeyStatus = byId('openai-key-status');
+const hospitalApproved = byId('hospital-approved');
+const costFields = {
+  targetPages: byId('forecast-target-pages'),
+  estimatedInputTokensPerPage: byId('planning-input-tokens'),
+  estimatedOutputTokensPerPage: byId('planning-output-tokens'),
+  fallbackPercent: byId('fallback-percent')
+};
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -127,9 +138,18 @@ async function analyzeSelectedFiles() {
     return;
   }
 
+  const mode = analysisMode.value;
+  if (mode !== 'local' && !hospitalApproved.checked) {
+    showNotification('Confirm hospital authorization before uploading medical records to OpenAI.', 'warning');
+    return;
+  }
   showLoading(true);
   try {
-    const response = await window.electronAPI.analyzeFiles(selectedFiles.map(file => file.path));
+    const response = await window.electronAPI.analyzeFiles({
+      filePaths: selectedFiles.map(file => file.path),
+      mode,
+      hospitalApproved: hospitalApproved.checked
+    });
     analysisResults = Array.isArray(response?.results) ? response.results : [];
     displayResults();
     showNotification(`Automated QA completed for ${analysisResults.length} file(s).`, 'success');
@@ -137,6 +157,7 @@ async function analyzeSelectedFiles() {
     showNotification(`Automated QA failed: ${error.message}`, 'error');
   } finally {
     showLoading(false);
+    refreshCostDashboard().catch(() => {});
   }
 }
 
@@ -318,7 +339,11 @@ async function updateStatusIndicators() {
   try {
     const status = await window.electronAPI.getBackendStatus();
     setStatus(backendStatus, status.status === 'running' ? 'Ready' : 'Error', status.status === 'running' ? 'connected' : 'error');
-    if (status.ollama !== 'connected') setStatus(ollamaStatus, 'Disconnected', 'error');
+    if (analysisMode.value !== 'local') {
+      const keyStatus = await window.electronAPI.getOpenAIKeyStatus();
+      setStatus(ollamaStatus, keyStatus?.configured ? 'Cloud Key Set' : 'Cloud Key Missing',
+        keyStatus?.configured ? 'connected' : 'warning');
+    } else if (status.ollama !== 'connected') setStatus(ollamaStatus, 'Disconnected', 'error');
     else if (!status.models?.ocr || !status.models?.analysis) setStatus(ollamaStatus, 'Models Missing', 'warning');
     else setStatus(ollamaStatus, 'Connected', 'connected');
   } catch (_) {
@@ -327,6 +352,82 @@ async function updateStatusIndicators() {
   }
 }
 
+
+function showCloudControls() {
+  cloudSettings.hidden = analysisMode.value === 'local';
+  refreshCostDashboard().catch(() => {});
+}
+
+function dollar(value, precision = 2) {
+  const amount = Number(value);
+  return String.fromCharCode(36) + (Number.isFinite(amount) ? amount : 0).toLocaleString('en-US', {
+    minimumFractionDigits: precision, maximumFractionDigits: precision
+  });
+}
+async function refreshCostDashboard() {
+  const mode = analysisMode.value;
+  const dashboard = await window.electronAPI.getCostDashboard(mode);
+  const run = dashboard.run;
+  byId('cost-spent').textContent = dollar(dashboard.recordedSpendUSD,
+    dashboard.recordedSpendUSD < 0.01 ? 6 : 2);
+  byId('cost-run-pages').textContent = run ? Number(run.totalPages).toLocaleString('en-US') : '—';
+  byId('cost-run-spent').textContent = run ? dollar(run.recordedSpendUSD, 6) : '—';
+  byId('cost-page').textContent = run ? dollar(run.forecastPerPageUSD, 6) : '—';
+  byId('cost-total').textContent = run ? dollar(run.projectedTotalUSD, 6) : '—';
+  byId('cost-basis').textContent = !run
+    ? 'No run recorded yet. Analyze a PDF to calculate its page-based costs.'
+    : 'Last run: ' + run.fileCount + ' file(s), ' + run.meteredPages + '/' + run.totalPages +
+      ' pages with reported usage. ' +
+      (run.pagesUnknown ? run.pagesUnknown + ' file(s) had unknown page count. ' : '') +
+      (run.costBasis === 'observed-api-usage' ? 'Per-page estimate uses reported API usage. ' : 'Per-page estimate uses planning assumptions. ') +
+      'Mode: ' + run.mode + '.';
+  byId('cost-target-projection').textContent = dashboard.targetPages === null
+    ? 'Optional future-project forecast: none entered. The last-run total is determined from the PDFs.'
+    : 'Optional ' + Number(dashboard.targetPages).toLocaleString('en-US') +
+      '-page forecast for selected mode (' + mode + '): ' +
+      dollar(dashboard.targetProjectionUSD) + ' (' + dashboard.targetCostBasis.replaceAll('-', ' ') +
+      '). This does not alter the last-run total.';
+  return dashboard;
+}
+function setPlanInputs(plan) {
+  for (const [key, input] of Object.entries(costFields)) {
+    input.value = plan[key] === null ? '' : plan[key];
+  }
+}
+async function configureApiKey() {
+  const key = apiKeyField.value;
+  try {
+    await window.electronAPI.setOpenAIKey(key);
+    apiKeyField.value = '';
+    apiKeyStatus.textContent = 'API key configured for this session. Not saved to disk.';
+    showNotification('OpenAI API key configured for this session.', 'success');
+  } catch (_) {
+    showNotification('Could not configure API key. Check the entered value.', 'error');
+  }
+}
+async function clearApiKey() {
+  await window.electronAPI.clearOpenAIKey();
+  apiKeyField.value = '';
+  apiKeyStatus.textContent = 'No API key configured. The key is not saved to disk.';
+}
+async function saveCostSettings() {
+  const plan = {};
+  for (const [key, input] of Object.entries(costFields)) {
+    plan[key] = input.value === '' ? null : Number(input.value);
+  }
+  try {
+    await window.electronAPI.saveCostPlan(plan);
+    const dashboard = await refreshCostDashboard();
+    setPlanInputs(dashboard.plan);
+    showNotification('Cost assumptions saved on this computer.', 'success');
+  } catch (_) {
+    showNotification('Could not save cost settings.', 'error');
+  }
+}
+analysisMode.addEventListener('change', showCloudControls);
+byId('save-openai-key').addEventListener('click', configureApiKey);
+byId('clear-openai-key').addEventListener('click', clearApiKey);
+byId('save-cost-plan').addEventListener('click', saveCostSettings);
 selectFilesBtn.addEventListener('click', handleFileSelection);
 clearFilesBtn.addEventListener('click', () => {
   selectedFiles = [];
@@ -350,6 +451,13 @@ document.addEventListener('DOMContentLoaded', () => {
   showLoading(false);
   selectedFilesDiv.style.display = 'none';
   resultsSection.style.display = 'none';
+  showCloudControls();
+  window.electronAPI.getOpenAIKeyStatus().then(status => {
+    if (status?.configured) apiKeyStatus.textContent = 'API key configured for this session.';
+  }).catch(() => {});
+  refreshCostDashboard().then(data => setPlanInputs(data.plan)).catch(() => {
+    byId('cost-basis').textContent = 'Could not load cost records.';
+  });
   updateStatusIndicators();
   setInterval(updateStatusIndicators, 10000);
 });

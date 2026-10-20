@@ -849,3 +849,39 @@ body {
         grid-template-columns: 1fr;
     }
 } 
+
+/* Provider selection and project cost projection */
+.provider-section, .cost-section {
+    margin: 24px 0;
+    padding: 24px;
+    background: rgba(255,255,255,0.96);
+    border: 1px solid #dbe2eb;
+    border-radius: 14px;
+}
+.provider-fields { max-width: 850px; display: grid; gap: 12px; }
+.provider-fields label, .cost-planning label {
+    display: block; font-size: 13px; font-weight: 600; color: #46546a; margin-bottom: 5px;
+}
+.provider-fields select, .provider-fields input[type=password], .cost-planning input {
+    width: 100%; min-height: 42px; padding: 9px 12px; border: 1px solid #cad3e2;
+    background: #fff; border-radius: 8px; font: inherit; color: #263547;
+}
+#cloud-settings { margin-top: 10px; display: grid; gap: 12px; }
+#cloud-settings[hidden], [hidden] { display: none !important; }
+.credential-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.credential-row input { flex: 1 1 260px; }
+.approval-line { display: flex !important; align-items: flex-start; gap: 9px; font-weight: 500 !important; line-height: 1.5; }
+.approval-line input { flex: 0 0 auto; margin-top: 3px; }
+.small-note { font-size: 13px; color: #586981; line-height: 1.5; margin-top: 8px; }
+.cost-cards {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 12px; margin: 14px 0;
+}
+.cost-card { padding: 16px; border: 1px solid #dbe2ed; border-radius: 10px; background: #f5f8fc; }
+.cost-card span { display: block; font-size: 12px; color: #5e6f87; margin-bottom: 9px; }
+.cost-card strong { font-size: 23px; color: #3f51b5; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.cost-planning {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    align-items: end; gap: 12px; margin: 18px 0;
+}
+.cost-planning button { min-height: 42px; }

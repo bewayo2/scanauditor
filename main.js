@@ -2,16 +2,21 @@
 
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
+const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const fs = require('fs-extra');
 const axios = require('axios');
 const XLSX = require('xlsx');
 const ConfiguredAnalyzer = require('./configured_analyzer');
+const CloudScanAnalyzer = require('./cloud_analyzer');
+const costTracker = require('./cost_tracker');
 const { ACTIVE_MODELS, isModelInstalled } = require('./model_config');
 const { AUDIT_CONFIG } = require('./audit_config');
 const { appendAuditRecord } = require('./audit_logger');
 
 let mainWindow;
+// In-memory only. Never save or log the hospital's API key.
+let sessionOpenAIKey = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -212,11 +217,43 @@ ipcMain.handle('select-files', async () => {
 
 ipcMain.handle('get-backend-status', getOllamaStatus);
 
-ipcMain.handle('analyze-files', async (_event, filePaths) => {
+ipcMain.handle('set-openai-key', (_event, value) => {
+  if (typeof value !== 'string' || value.trim().length < 10 || value.length > 300) {
+    throw new Error('Enter a valid OpenAI API key.');
+  }
+  sessionOpenAIKey = value.trim();
+  return { configured: true };
+});
+ipcMain.handle('clear-openai-key', () => {
+  sessionOpenAIKey = null;
+  return { configured: false };
+});
+ipcMain.handle('get-openai-key-status', () => ({ configured: Boolean(sessionOpenAIKey) }));
+ipcMain.handle('get-cost-dashboard', (_event, mode) => {
+  return costTracker.getDashboard(app.getPath('userData'), ['tiered', 'astra'].includes(mode) ? mode : 'tiered');
+});
+ipcMain.handle('save-cost-plan', async (_event, plan) => {
+  await costTracker.savePlan(app.getPath('userData'), plan);
+  return costTracker.getDashboard(app.getPath('userData'), 'tiered');
+});
+
+ipcMain.handle('analyze-files', async (_event, request) => {
+  const filePaths = Array.isArray(request) ? request : request?.filePaths;
+  const mode = Array.isArray(request) ? 'local' : request?.mode || 'local';
   if (!Array.isArray(filePaths) || filePaths.length === 0) throw new Error('No files selected.');
   if (filePaths.length > 25) throw new Error('Analyze no more than 25 files at one time.');
-
-  const analyzer = new ConfiguredAnalyzer();
+  if (!['local', 'tiered', 'astra'].includes(mode)) throw new Error('Unsupported analysis mode.');
+  if (mode !== 'local' && (!sessionOpenAIKey || request?.hospitalApproved !== true)) {
+    throw new Error('Hospital authorization and a hospital-owned API key are required for cloud processing.');
+  }
+  const runId = crypto.randomUUID();
+  const analyzer = mode === 'local'
+    ? new ConfiguredAnalyzer()
+    : new CloudScanAnalyzer({
+      apiKey: sessionOpenAIKey,
+      mode,
+      onUsage: entry => costTracker.recordUsage(app.getPath('userData'), { ...entry, runId })
+    });
   const results = [];
 
   for (const requestedPath of filePaths) {
@@ -237,7 +274,17 @@ ipcMain.handle('analyze-files', async (_event, filePaths) => {
     await writeAuditRecord(result);
   }
 
-  return { results };
+  // Record only page counts and the run identifier; never store filenames or PHI.
+  const totalPages = results.reduce((sum, result) => sum + (Number(result?.analysis?.fileInformation?.totalPages) || 0), 0);
+  const pagesUnknown = results.filter(result => !(Number(result?.analysis?.fileInformation?.totalPages) > 0)).length;
+  try {
+    await costTracker.recordRun(app.getPath('userData'), {
+      runId, mode, fileCount: results.length, totalPages, pagesUnknown
+    });
+  } catch (_) {
+    console.error('[ScanAuditor] cost_run_record_failed');
+  }
+  return { results, runId };
 });
 
 ipcMain.handle('export-to-excel', async (_event, analysisResults) => {

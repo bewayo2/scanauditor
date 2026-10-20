@@ -14,12 +14,62 @@
         <div class="logo"><h1>ScanAuditor</h1></div>
         <div class="status-indicator">
           <div class="status-item"><span class="status-label">App:</span><span id="backend-status" class="status-badge">Checking...</span></div>
-          <div class="status-item"><span class="status-label">Ollama:</span><span id="ollama-status" class="status-badge">Checking...</span></div>
+          <div class="status-item"><span class="status-label">Inference:</span><span id="ollama-status" class="status-badge">Checking...</span></div>
         </div>
       </div>
     </header>
 
     <main class="main-content">
+      <section class="provider-section" aria-labelledby="provider-heading">
+        <div class="section-header">
+          <h2 id="provider-heading">Analysis Provider</h2>
+          <p>Local Ollama is the default. OpenAI sends medical-record page images to the hospital-approved API organization only when you explicitly choose a cloud mode.</p>
+        </div>
+        <div class="provider-fields">
+          <label for="analysis-mode">Mode</label>
+          <select id="analysis-mode">
+            <option value="local">Local only (Ollama; no API charges)</option>
+            <option value="tiered">OpenAI: GPT-6 Luna + GPT-6.1 Sol fallback</option>
+            <option value="astra">OpenAI: GPT-6 Astra benchmark</option>
+          </select>
+          <div id="cloud-settings" hidden>
+            <label for="openai-api-key">Hospital OpenAI API key (session-only)</label>
+            <div class="credential-row">
+              <input id="openai-api-key" type="password" autocomplete="off" spellcheck="false" placeholder="Enter hospital project API key" />
+              <button id="save-openai-key" type="button" class="btn btn-primary">Use Key</button>
+              <button id="clear-openai-key" type="button" class="btn btn-secondary">Clear Key</button>
+            </div>
+            <p id="openai-key-status" class="small-note">No API key configured. The key is not saved to disk.</p>
+            <label class="approval-line"><input type="checkbox" id="hospital-approved" /> I confirm the hospital has approved this external processing and its API organization has the required agreement/configuration for patient data.</label>
+            <p class="small-note">The app cannot verify your BAA or data-retention settings. Do not use a personal API key for production patient records.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="cost-section" aria-labelledby="cost-heading">
+        <div class="section-header">
+          <h2 id="cost-heading">Scan Cost Tracker</h2>
+          <p>The last run's page count is read directly from the PDFs analyzed. No fixed record count is assumed. All amounts are estimated USD API charges, not a billing invoice.</p>
+        </div>
+        <div class="cost-cards">
+          <div class="cost-card"><span>Pages in last run</span><strong id="cost-run-pages">—</strong></div>
+          <div class="cost-card"><span>API spend for last run</span><strong id="cost-run-spent">—</strong></div>
+          <div class="cost-card"><span>Est. cost per page (last run)</span><strong id="cost-page">—</strong></div>
+          <div class="cost-card"><span>Est. total for last run</span><strong id="cost-total">—</strong></div>
+          <div class="cost-card"><span>API spend across all runs</span><strong id="cost-spent">—</strong></div>
+        </div>
+        <p id="cost-basis" class="small-note">Run a PDF to see the page-based cost breakdown.</p>
+        <div class="cost-planning">
+          <div><label for="forecast-target-pages">Optional future target (pages)</label><input type="number" id="forecast-target-pages" min="1" max="100000000" step="1" placeholder="Leave blank" /></div>
+          <div><label for="planning-input-tokens">Estimated input tokens / page</label><input type="number" id="planning-input-tokens" min="1" max="1000000" step="100" value="5000" /></div>
+          <div><label for="planning-output-tokens">Estimated output tokens / page</label><input type="number" id="planning-output-tokens" min="1" max="100000" step="100" value="500" /></div>
+          <div><label for="fallback-percent">Estimated Sol fallback %</label><input type="number" id="fallback-percent" min="0" max="100" step="1" value="10" /></div>
+          <button id="save-cost-plan" type="button" class="btn btn-secondary">Save Cost Assumptions</button>
+        </div>
+        <p id="cost-target-projection" class="small-note">Optional future-project forecast: none entered.</p>
+        <p class="small-note">If a scan fails or some pages return no API token usage, the remaining pages are estimated separately. Future-page projections never replace the actual page total of the last run.</p>
+      </section>
+
       <section class="file-section">
         <div class="section-header">
           <h2>File Selection</h2>
