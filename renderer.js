@@ -340,7 +340,11 @@ async function updateStatusIndicators() {
   try {
     const status = await window.electronAPI.getBackendStatus();
     setStatus(backendStatus, status.status === 'running' ? 'Ready' : 'Error', status.status === 'running' ? 'connected' : 'error');
-    if (status.ollama !== 'connected') setStatus(ollamaStatus, 'Disconnected', 'error');
+    if (analysisMode.value !== 'local') {
+      const keyStatus = await window.electronAPI.getOpenAIKeyStatus();
+      setStatus(ollamaStatus, keyStatus?.configured ? 'Cloud Key Set' : 'Cloud Key Missing',
+        keyStatus?.configured ? 'connected' : 'warning');
+    } else if (status.ollama !== 'connected') setStatus(ollamaStatus, 'Disconnected', 'error');
     else if (!status.models?.ocr || !status.models?.analysis) setStatus(ollamaStatus, 'Models Missing', 'warning');
     else setStatus(ollamaStatus, 'Connected', 'connected');
   } catch (_) {
