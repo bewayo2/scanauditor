@@ -50,26 +50,33 @@ function planningPerPage(plan, mode = 'tiered') {
 function summarizeCost(entries, plan, mode = 'tiered') {
   const p = validatePlan(plan);
   const pages = new Set();
+  const modePages = new Set();
   const byModel = {};
   let recordedSpendUSD = 0;
+  let modeSpend = 0;
   let chargedCalls = 0;
+  const modeModels = mode === 'astra' ? new Set(['gpt-6-astra']) : new Set(['gpt-6-luna', 'gpt-6.1-sol']);
   for (const entry of entries) {
     if (!entry || !Object.hasOwn(MODEL_PRICING, entry.model)) continue;
     const cost = usageCost(entry.model, entry.usage);
     recordedSpendUSD += cost;
     chargedCalls += 1;
     byModel[entry.model] = (byModel[entry.model] || 0) + cost;
-    if (typeof entry.pageKey === 'string' && entry.pageKey) pages.add(entry.pageKey);
+    if (modeModels.has(entry.model)) modeSpend += cost;
+    if (typeof entry.pageKey === 'string' && entry.pageKey) {
+      pages.add(entry.pageKey);
+      if (modeModels.has(entry.model)) modePages.add(entry.pageKey);
+    }
   }
   const processedPages = pages.size;
   const plannedPages = Math.ceil(p.totalRecords * p.averagePagesPerRecord);
-  const observedPerPage = processedPages ? recordedSpendUSD / processedPages : null;
+  const observedPerPage = modePages.size ? modeSpend / modePages.size : null;
   const plannedPerPage = planningPerPage(p, mode);
   const perPage = observedPerPage === null ? plannedPerPage : observedPerPage;
   const remainingPages = Math.max(0, plannedPages - processedPages);
   return {
     plan: p, mode, pricing: MODEL_PRICING, currency: 'USD',
-    recordedSpendUSD, chargedCalls, processedPages,
+    recordedSpendUSD, chargedCalls, processedPages, byModel,
     observedPerPageUSD: observedPerPage,
     estimatedPerPageUSD: plannedPerPage,
     forecastPerPageUSD: perPage,
