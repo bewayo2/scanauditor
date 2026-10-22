@@ -101,3 +101,24 @@ test('cloud bulk analysis is blocked without explicit hospital consent and API k
   const { root, userData } = await tempJob(t);
   await assert.rejects(runBulkAudit({ root, userData, mode: 'tiered', analyzerFactory: fakeAnalyzer }), /authorization/);
 });
+
+test('cloud spend cap stops after currently charged PDF without starting another', async t => {
+  const { root, userData } = await tempJob(t);
+  let paidCalls = 0;
+  const factory = ({ onUsage }) => ({
+    analyzeFile: async file => {
+      paidCalls += 1;
+      await onUsage({ model: 'gpt-6-luna', pageKey: 'synthetic-page-' + paidCalls,
+        usage: { input_tokens: 10000, output_tokens: 1000 } });
+      return fakeAnalyzer().analyzeFile(file);
+    }
+  });
+  const result = await runBulkAudit({
+    root, userData, mode: 'tiered', apiKey: 'sk-test-nonproduction',
+    hospitalApproved: true, maxUsd: 0.001, analyzerFactory: factory
+  });
+  assert.equal(result.processed, 1);
+  assert.equal(result.stopped, true);
+  assert.equal(paidCalls, 1);
+  assert.ok(result.meteredSpendUSD >= 0.001);
+});
