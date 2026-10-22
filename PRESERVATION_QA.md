@@ -6,9 +6,13 @@ ScanAuditor evaluates the **digital reproduction**, not authority to destroy pap
 
 ## Internal completeness
 
-Printed page numbering such as Page 1 of 4 through Page 4 of 4 is checked against PDF order. It detects skipped numbers, repeated numbers and potentially unfinished form sequences, while allowing a new sequence when concatenated documents restart at page 1.
+**Printed numbering is optional and scoped to individual forms or visits, not an entire patient record.** For example, one PDF can contain a visit numbered 1 of 4 through 4 of 4, an unnumbered handwritten continuation, another visit numbered 1 of 6 through 6 of 6, and several unnumbered laboratory reports. This is normal and does not itself trigger a review.
 
-The displayed states are **internally-consistent**, **potential-gap**, or **not-establishable**. Even internally consistent PDFs do NOT establish original-paper completeness. Page numbering is OCR-derived; a suspected gap is a review finding, not definitive proof of missing paper. Entirely omitted unnumbered sheets cannot be discovered from the PDF alone.
+ScanAuditor groups numbering into separate sequences whenever a page restarts at 1, decreases, or declares a different total. It keeps unnumbered pages in the PDF without assuming they are missing or erroneous. An unnumbered page between two numbered pages might itself contain the content implied by a skipped printed page number.
+
+A review finding for an internal gap now requires **a clearly established consecutive numbered run beginning at 1, followed by an abrupt jump on adjacent PDF pages** (for example, printed 1 of 4, 2 of 4, then 4 of 4). A less certain jump, such as one separated by an unnumbered continuation sheet, is informational rather than an automatic review finding. A form finishing short of its declared total at the **end of the PDF** may be a review candidate only after several consecutive numbered pages establish the sequence; a visit ending before another visit starts is not automatically considered incomplete. Duplicate printed numbers without strong form context are informational rather than proof of a duplicate scan.
+
+The displayed states are **internally-consistent** (one complete numbered section), **numbered-sections-consistent** (multiple complete numbered sections and/or unnumbered sheets), **potential-gap** (strong suspicion requiring comparison), and **not-establishable** (insufficient evidence). Even internally consistent sections do NOT establish original-paper completeness. Page numbering is OCR-derived and can contain recognition errors. Entirely omitted unnumbered paper sheets cannot be discovered from the PDF alone.
 
 ## Content preservation
 
