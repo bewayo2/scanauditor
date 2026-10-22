@@ -29,11 +29,16 @@ async function main() {
   const stop = { requested: false };
   process.on('SIGINT', () => { stop.requested = true; process.stderr.write('Stopping after current PDF; resume with the same command.\n'); });
   const maxRaw = argument('--max-files');
-  const max = maxRaw === undefined ? Infinity : Number(maxRaw);
+  const max = maxRaw === undefined ? (mode === 'local' ? Infinity : 100) : Number(maxRaw);
+  const maxUsdRaw = argument('--max-usd');
+  const maxUsd = maxUsdRaw === undefined ? 5 : Number(maxUsdRaw);
+  if (mode !== 'local' && (!Number.isFinite(maxUsd) || maxUsd < 0.01 || maxUsd > 100000)) {
+    throw new Error('Cloud batch requires a valid API spend limit.');
+  }
   if (maxRaw !== undefined && (!Number.isSafeInteger(max) || max < 1)) throw new Error('Invalid --max-files value.');
   const stats = await runBulkAudit({
     root, userData, mode, apiKey, hospitalApproved: consent,
-    retryFailed: process.argv.includes('--retry-failed'), maxFiles: max,
+    retryFailed: process.argv.includes('--retry-failed'), maxFiles: max, maxUsd,
     cancellation: stop,
     onProgress: s => process.stdout.write(JSON.stringify({
       scanned: s.processed, skipped: s.skippedFromCheckpoint,
