@@ -28,7 +28,7 @@ function evidenceReport(result) {
   })) : [];
   const payload = {
     schemaVersion: 1,
-    generatedAt: new Date().toISOString(),
+    generatedAt: String(metadata.analysisDate || analysis.fileInformation?.analysisDate || ''),
     inputSha256: inputHash,
     pageCount: Number(analysis.fileInformation?.totalPages) || 0,
     appVersion: String(metadata.appVersion || ''),
