@@ -26,6 +26,8 @@ The evidence digest is deterministic for an existing analysis result, but is **n
 
 Use **Select PDF Folder** and **Start / Resume Folder Audit** in the desktop UI. It traverses subfolders, skips symbolic links, processes PDFs one at a time, and records an append-only per-file checkpoint. **Stop After Current File** halts safely. Re-select the same folder and mode to resume; completed files are skipped. Select **Retry analysis failures** to reattempt files previously recorded as failed. A modified file gets a new checkpoint key.
 
+The desktop UI starts with a **100-new-file pilot limit** and a **$5 metered API spend limit** for cloud mode. The CLI likewise defaults to 100 new files and $5 for cloud runs; use --max-files N and --max-usd N to increase deliberately. Spending limits are checked **between PDFs**, so a large single PDF can exceed the limit before the stop takes effect. These are safeguards, not billing-provider hard caps.
+
 The local journal and evidence are stored in Electron userData/bulk-audit/<hash>/ using keyed path hashes, not source filenames or patient text. The original PDF remains in place. If a paid request succeeds but the app stops before checkpointing, resuming may incur another API request and charge.
 
 ### Command-line processing
