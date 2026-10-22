@@ -58,6 +58,10 @@ OCR and image-quality analysis always use the configured vision model. The Elect
 
 Results are **Automated QA Passed**, **Review Required**, or **Analysis Failed**. Missing identifiers do not by themselves imply a bad scan; the app looks for continuation pages. Unreadable/cutoff pages, identity conflicts, uncertainty, anomalies, duplicates, and failed analysis are reported conservatively. The app cannot prove source-paper completeness, clinical correctness, or that an issue was introduced during scanning.
 
+## Digital preservation checks and million-file folder audits
+
+ScanAuditor now checks **internal PDF pagination gaps** (not completeness against the original paper), observes printed text/handwriting/stamps/signatures/marginal notes when using approved cloud inference, and produces PHI-minimized JSON evidence with a file hash, version details, categorical findings and a digest. The desktop app includes an optional **Resumable Folder Audit** with checkpointed scanning, stop/resume and a local evidence journal. A CLI is also available for supervised archive trials. See [PRESERVATION_QA.md](PRESERVATION_QA.md) for workflow, scale limits and safety requirements.
+
 ## Optional OpenAI models and costing
 
 The user can select **Local only**, **GPT-6 Luna with GPT-6.1 Sol fallback**, or **GPT-6 Astra benchmark**. One cloud multimodal request per page extracts text, patient fields, dates, and quality observations. The app only sends medical images externally when cloud mode is explicitly selected, an API key has been entered, and hospital authorization is confirmed. The API key is kept in memory for this session, not persisted.
