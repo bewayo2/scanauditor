@@ -222,3 +222,48 @@ test('technical OCR failures are reported separately from document uncertainty',
     'Retry automated analysis for technical model-processing failures before assigning manual source review.'
   ]);
 });
+
+
+test('printed form pagination restarts per visit even halfway through a combined PDF', async () => {
+  class NoCallAnalyzer extends ResilientAnalyzer {
+    constructor() { super({ auditConfig: auditConfig() }); this.modelCalls = 0; }
+    async generateStructured() { this.modelCalls += 1; throw new Error('not needed'); }
+    log() {}
+  }
+  const analyzer = new NoCallAnalyzer();
+  const printed = [[1,4],[2,4],[3,4],[4,4],[1,6],[2,6],[3,6],[4,6],[5,6],[6,6]];
+  const contexts = printed.map(([n, total], index) => ({
+    pageNumber: index + 1, ocrText: 'Visit record Page ' + n + ' of ' + total,
+    analysis: page(index + 1)
+  }));
+  const result = await analyzer.classifyContinuationPages(contexts, 'mixed-visits.pdf');
+  assert.deepEqual(result.documentStartPages, [1,5]);
+  assert.deepEqual(result.continuationPages, [2,3,4,6,7,8,9,10]);
+  assert.deepEqual(result.unresolvedPages, []);
+  assert.equal(analyzer.modelCalls, 0);
+});
+
+test('unnumbered continuation sheets may be linked by structure without fabricated pagination', async () => {
+  class StructuralAnalyzer extends ResilientAnalyzer {
+    constructor() { super({ auditConfig: auditConfig() }); this.modelCalls = 0; }
+    async generateStructured() {
+      this.modelCalls += 1;
+      return { classification: 'continuation', confidence: 'high',
+        direction: 'previous', evidence: 'A sentence continues across sheets.' };
+    }
+    log() {}
+  }
+  const analyzer = new StructuralAnalyzer();
+  const contexts = [
+    { pageNumber: 1, ocrText: 'Visit 1 Page 1 of 2', analysis: page(1) },
+    { pageNumber: 2, ocrText: 'Visit 1 Page 2 of 2', analysis: page(2) },
+    { pageNumber: 3, ocrText: 'Continuation of nursing notes with no printed number', analysis: page(3) },
+    { pageNumber: 4, ocrText: 'Visit 2 Page 1 of 2', analysis: page(4) },
+    { pageNumber: 5, ocrText: 'Visit 2 Page 2 of 2', analysis: page(5) }
+  ];
+  const result = await analyzer.classifyContinuationPages(contexts, 'mixed-visits.pdf');
+  assert.deepEqual(result.documentStartPages, [1,4]);
+  assert.deepEqual(result.continuationPages, [2,3,5]);
+  assert.equal(result.resolvedPercentage, 100);
+  assert.equal(analyzer.modelCalls, 1);
+});
