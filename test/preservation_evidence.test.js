@@ -118,3 +118,12 @@ test('evidence digest is stable and patient identifiers are excluded', () => {
     assert.equal(serialized.includes(forbidden), false);
   }
 });
+
+test('OCR failure must not conceal independent blank-image evidence', () => {
+  const page = contexts([''])[0];
+  page.analysis.success = false;
+  const r = inspectContentPreservation([page], {}, {
+    pages: [{ pageNumber: 1, whitePixelRatio: 0.9995, edgeVariance: 0 }]
+  });
+  assert.ok(r.issues.some(x => x.code === 'POSSIBLY_BLANK_PAGE'));
+});
