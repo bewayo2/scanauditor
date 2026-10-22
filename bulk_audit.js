@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const readline = require('readline');
 const ConfiguredAnalyzer = require('./configured_analyzer');
 const CloudScanAnalyzer = require('./cloud_analyzer');
-const { recordUsage, recordRun } = require('./cost_tracker');
+const { recordUsage, recordRun, usageCost } = require('./cost_tracker');
 const { evidenceReport } = require('./evidence_report');
 
 const MODES = new Set(['local', 'tiered', 'astra']);
@@ -52,12 +52,15 @@ async function readJournal(file) {
 async function runBulkAudit({
   root, userData, mode = 'local', apiKey = null, hospitalApproved = false,
   onProgress = () => {}, cancellation = { requested: false }, maxFiles = Infinity,
-  retryFailed = false, analyzerFactory = null
+  retryFailed = false, maxUsd = 5, analyzerFactory = null
 } = {}) {
   if (!MODES.has(mode)) throw new Error('Unsupported bulk analysis mode.');
   if (!root || !userData) throw new Error('Choose a PDF folder.');
   if (mode !== 'local' && (!hospitalApproved || !apiKey)) {
     throw new Error('Hospital authorization and project API key are required for cloud batch analysis.');
+  }
+  if (mode !== 'local' && (!Number.isFinite(maxUsd) || maxUsd <= 0 || maxUsd > 100000)) {
+    throw new Error('Set a positive cloud-batch API spending limit.');
   }
   const normalizedRoot = await fs.realpath(root);
   const stat = await fs.stat(normalizedRoot);
@@ -77,20 +80,23 @@ async function runBulkAudit({
   const evidence = path.join(output, 'evidence.jsonl');
   const completed = await readJournal(journal);
   const runId = crypto.randomUUID();
-  const analyzer = analyzerFactory ? analyzerFactory({
-    mode, onUsage: x => recordUsage(userData, { ...x, runId })
-  }) : mode === 'local' ? new ConfiguredAnalyzer() :
-    new CloudScanAnalyzer({
-      mode, apiKey, onUsage: x => recordUsage(userData, { ...x, runId })
-    });
+  let meteredSpendUSD = 0;
+  const onUsage = async entry => {
+    meteredSpendUSD += usageCost(entry.model, entry.usage);
+    await recordUsage(userData, { ...entry, runId });
+  };
+  const analyzer = analyzerFactory ? analyzerFactory({ mode, onUsage }) :
+    mode === 'local' ? new ConfiguredAnalyzer() :
+      new CloudScanAnalyzer({ mode, apiKey, onUsage });
   const counters = {
     filesSeen: 0, processed: 0, skippedFromCheckpoint: 0, passed: 0,
     reviewRequired: 0, analysisFailed: 0, pagesProcessed: 0,
-    stopped: false, runId, mode
+    stopped: false, runId, mode, meteredSpendUSD: 0, spendingLimitUSD: mode === 'local' ? null : maxUsd
   };
   try {
     for await (const pdfPath of walkPdfs(normalizedRoot)) {
-      if (cancellation.requested || counters.processed >= maxFiles) {
+      if (cancellation.requested || counters.processed >= maxFiles ||
+          (mode !== 'local' && meteredSpendUSD >= maxUsd)) {
         counters.stopped = true;
         break;
       }
@@ -117,6 +123,7 @@ async function runBulkAudit({
       else if (safeStatus === 'review-required') counters.reviewRequired += 1;
       else counters.analysisFailed += 1;
       counters.pagesProcessed += Number(result?.analysis?.fileInformation?.totalPages) || 0;
+      counters.meteredSpendUSD = meteredSpendUSD;
 
       // Evidence is deliberately limited to version/config/hash/status; no OCR,
       // filename, original directory, patient identifier, or free-text excerpts.
