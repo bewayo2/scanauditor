@@ -22,8 +22,9 @@ function inspectContentPreservation(pageContexts = [], imageAnalysis = {}, metri
       STATES.has(record?.[field]) ? record[field] : 'not-observed']));
     const edges = EDGE_STATES.has(record?.documentEdges) ? record.documentEdges : 'unknown';
     const metric = metricMap.get(number);
-    const blankCandidate = ctx.analysis?.success === true &&
-      String(ctx.ocrText || '').trim().length < 20 &&
+    // Blank-looking pages often return NO OCR text at all. A failed OCR stage
+    // must not conceal this independent, deterministic image observation.
+    const blankCandidate = String(ctx.ocrText || '').trim().length < 20 &&
       Number(metric?.whitePixelRatio) >= 0.995 &&
       Number(metric?.edgeVariance) < 20 &&
       !/intentionally\s+blank/i.test(ctx.ocrText || '');
