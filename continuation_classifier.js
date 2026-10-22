@@ -30,26 +30,29 @@ async function classifyContinuationPage({ analyzer, pageContexts, index, fileNam
   const totalPages = pageContexts.length;
 
   const explicit = parseExplicitPageSequence(current.ocrText);
-  if (explicit && pageNumber === 1 && explicit.current === 1 && explicit.total === totalPages) {
+  const previousSequence = index > 0
+    ? parseExplicitPageSequence(pageContexts[index - 1]?.ocrText) : null;
+  // Printed numbers belong to a form/visit, not to the containing PDF.
+  // "Page 1 of N" at ANY PDF position begins a new numbered section.
+  if (explicit?.current === 1) {
     return {
-      entry: { pageNumber, classification: 'document-start', confidence: 'high', direction: 'none', method: 'explicit-pagination' },
-      diagnostic: { status: 'passed', method: 'explicit-pagination', pageSequence: '1/' + totalPages }
+      entry: { pageNumber, classification: 'document-start', confidence: 'high',
+        direction: 'none', method: 'explicit-form-start' },
+      diagnostic: { status: 'passed', method: 'explicit-form-start',
+        pageSequence: '1/' + explicit.total }
     };
   }
-  if (explicit && pageNumber > 1 && explicit.current === pageNumber && explicit.total === totalPages) {
+  // Only the immediately preceding printed page of the SAME declared total
+  // can establish sequential continuation deterministically. For intervening
+  // unnumbered sheets we defer to structural context/model, not PDF offsets.
+  if (explicit && previousSequence && pageNumber > 1 &&
+      explicit.total === previousSequence.total &&
+      explicit.current === previousSequence.current + 1) {
     return {
-      entry: {
-        pageNumber,
-        classification: 'continuation',
-        confidence: 'high',
-        direction: 'previous',
-        method: 'explicit-pagination'
-      },
-      diagnostic: {
-        status: 'passed',
-        method: 'explicit-pagination',
-        pageSequence: `${explicit.current}/${explicit.total}`
-      }
+      entry: { pageNumber, classification: 'continuation', confidence: 'high',
+        direction: 'previous', method: 'explicit-pagination' },
+      diagnostic: { status: 'passed', method: 'explicit-pagination',
+        pageSequence: String(explicit.current) + '/' + explicit.total }
     };
   }
 
@@ -57,7 +60,7 @@ async function classifyContinuationPage({ analyzer, pageContexts, index, fileNam
   const next = index < pageContexts.length - 1 ? pageContexts[index + 1] : null;
   const prompt = `Determine whether CURRENT PAGE of ${path.basename(fileName)} is a continuation of the same physical document/form as an adjacent page.\n\n` +
     'This is a document-structure classification task. Do not determine whether the patient is correct. Do not invent an identity. Do not treat absence of a name as an error.\n' +
-    'Strong continuation evidence may include continued sentences/tables, repeated form structure or heading, explicit page numbering, continued clinical notes, signatures/sections that clearly continue an adjacent page, or other clear multi-page structure.\n' +
+    'Strong continuation evidence may include continued sentences/tables, repeated form structure or heading, explicit page numbering, continued clinical notes, signatures/sections that clearly continue an adjacent page, or other clear multi-page structure. Numbering may restart at 1 for each visit or form; unnumbered continuation sheets are normal. Printed form numbers need not match the PDF position.\n' +
     'Return continuation only with strong evidence. If evidence is weak, return uncertain. If this appears to be an independent document with no identifier, return standalone.\n\n' +
     `Physical page number in PDF: ${pageNumber} of ${totalPages}\n` +
     `Previous page has confirmed identifier: ${neighborHasIdentifier(previous) ? 'yes' : 'no'}\n` +
