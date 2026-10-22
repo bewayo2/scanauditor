@@ -2,90 +2,121 @@
 
 const { parseExplicitPageSequence } = require('./inference_resilience');
 
-// Detect inconsistencies visible *inside* the PDF. A consistent sequence
-// cannot establish that every sheet in the original paper folder was scanned.
+// Page numbering is optional and normally scoped to a FORM or VISIT, not the
+// patient's whole record. The PDF alone cannot establish source-paper presence.
 function analyzeInternalCompleteness(pageContexts = [], totalPages = pageContexts.length) {
-  const pages = pageContexts.map((p, i) => {
-    const observed = p?.analysis?.success === false ? null : parseExplicitPageSequence(p?.ocrText);
+  const pages = pageContexts.map((context, index) => {
+    // OCR may find a printed sequence only if that page was readable.
+    const sequence = context?.analysis?.success === false
+      ? null : parseExplicitPageSequence(context?.ocrText);
     return {
-      pdfPage: i + 1,
-      sequencePage: observed?.current ?? null,
-      sequenceTotal: observed?.total ?? null,
-      readable: p?.analysis?.success === true
+      pdfPage: index + 1,
+      sequencePage: sequence?.current ?? null,
+      sequenceTotal: sequence?.total ?? null,
+      readable: context?.analysis?.success === true
     };
   });
   const issues = [];
+  const observations = [];
   const segments = [];
+  const unnumberedPages = pages.filter(page => page.sequencePage === null).map(page => page.pdfPage);
   let segment = null;
 
-  function addIssue(code, affected, missing = []) {
-    const list = [...new Set(affected)].sort((a, b) => a - b);
-    if (issues.some(issue => issue.code === code && issue.pages.join(',') === list.join(','))) return;
-    issues.push({ code, pages: list, missingSequencePages: missing });
+  function add(collection, code, affectedPages, missing = []) {
+    const seen = [...new Set(affectedPages)].sort((a, b) => a - b);
+    if (collection.some(item => item.code === code && item.pages.join(',') === seen.join(','))) return;
+    collection.push({ code, pages: seen, missingSequencePages: missing });
   }
-  function finishSegment() {
+  function finish() {
     if (segment) segments.push(segment);
     segment = null;
   }
-  for (const item of pages) {
-    if (!item.sequencePage) {
-      finishSegment();
-      continue;
-    }
-    const prev = segment?.last;
-    if (!prev || item.sequencePage === 1 || item.sequenceTotal !== prev.sequenceTotal) {
-      finishSegment();
-      segment = {
-        first: item, last: item, total: item.sequenceTotal, entries: [item],
-        startsAtOne: item.sequencePage === 1
-      };
-      continue;
-    }
-    if (item.sequencePage === prev.sequencePage) {
-      addIssue('REPEATED_PRINTED_PAGE_NUMBER', [prev.pdfPage, item.pdfPage]);
-    } else if (item.sequencePage < prev.sequencePage) {
-      // Different form may start here; do not infer lost pages from a reset.
-      finishSegment();
-      segment = {
-        first: item, last: item, total: item.sequenceTotal, entries: [item],
-        startsAtOne: false
-      };
-      continue;
-    } else if (item.sequencePage > prev.sequencePage + 1) {
-      const missing = Array.from({ length: item.sequencePage - prev.sequencePage - 1 }, (_, n) => prev.sequencePage + n + 1);
-      addIssue('PRINTED_PAGE_SEQUENCE_GAP', [prev.pdfPage, item.pdfPage], missing);
-    }
-    segment.entries.push(item);
-    segment.last = item;
+  function begin(page) {
+    segment = {
+      first: page, last: page, total: page.sequenceTotal,
+      entries: [page], startsAtOne: page.sequencePage === 1, hasJump: false
+    };
   }
-  finishSegment();
 
-  // Only assert a trailing gap if the form begins with Page 1 of N, its
-  // observed numbering is internally consistent, and it ends with the PDF.
+  for (const page of pages) {
+    if (page.sequencePage === null) {
+      // Do not require pagination on handwritten or additional sheets.
+      // An unnumbered page may itself contain the missing numbered content.
+      continue;
+    }
+    if (!segment) {
+      begin(page);
+      continue;
+    }
+    const prev = segment.last;
+    if (page.sequencePage === 1 || page.sequenceTotal !== segment.total ||
+        page.sequencePage < prev.sequencePage) {
+      // New visit/form, potentially with the SAME "of N" as the prior visit.
+      finish();
+      begin(page);
+      continue;
+    }
+    if (page.sequencePage === prev.sequencePage) {
+      // Two forms can bear the same printed number; no automatic scan defect.
+      add(observations, 'REPEATED_PRINTED_PAGE_NUMBER', [prev.pdfPage, page.pdfPage]);
+      finish();
+      begin(page);
+      continue;
+    }
+
+    const delta = page.sequencePage - prev.sequencePage;
+    if (delta > 1) {
+      const missing = Array.from({ length: delta - 1 }, (_, i) => prev.sequencePage + 1 + i);
+      // Require a strong, consecutively observed run already starting at 1
+      // before referring an abrupt jump for review. If there was an unnumbered
+      // PDF sheet in between, do not infer that the source sheet was omitted.
+      const stronglySuggested = segment.startsAtOne && segment.entries.length >= 2 &&
+        prev.pdfPage + 1 === page.pdfPage;
+      add(stronglySuggested ? issues : observations,
+        stronglySuggested ? 'PRINTED_PAGE_SEQUENCE_GAP' : 'UNCONFIRMED_PAGE_NUMBER_JUMP',
+        [prev.pdfPage, page.pdfPage], missing);
+      segment.hasJump = true;
+    }
+    segment.entries.push(page);
+    segment.last = page;
+  }
+  finish();
+
+  // A partly numbered form at the end of a *combined* PDF is only suggestive.
+  // Refer only when we saw 1, 2, 3... together at its physical end.
   const last = segments[segments.length - 1];
-  if (last?.startsAtOne && last.last.pdfPage === totalPages &&
-      last.last.sequencePage < last.total && last.entries.length >= 2) {
-    const missing = Array.from({ length: last.total - last.last.sequencePage }, (_, i) => last.last.sequencePage + i + 1);
-    addIssue('POSSIBLE_TRAILING_PAGES', [last.last.pdfPage], missing);
+  if (last?.startsAtOne && last.entries.length >= 3 &&
+      !last.hasJump && last.last.pdfPage === totalPages &&
+      last.last.sequencePage < last.total) {
+    const missing = Array.from({ length: last.total - last.last.sequencePage },
+      (_, index) => last.last.sequencePage + index + 1);
+    add(issues, 'POSSIBLE_TRAILING_PAGES', [last.last.pdfPage], missing);
   }
 
-  // Printed pagination on only some pages is not a proof of loss.
-  const numberedPages = pages.filter(item => item.sequencePage !== null).length;
+  const numberedPages = pages.length - unnumberedPages.length;
   const failedPages = pages.filter(item => !item.readable).map(item => item.pdfPage);
-  const coherentFullSequence = failedPages.length === 0 && numberedPages === totalPages &&
-    issues.length === 0 && segments.length === 1 &&
-    segments[0].startsAtOne && segments[0].total === totalPages &&
-    segments[0].last.sequencePage === totalPages;
+  const coherentSections = segments.length > 0 && issues.length === 0 &&
+    failedPages.length === 0 && segments.every(part =>
+      part.startsAtOne && !part.hasJump && part.last.sequencePage === part.total);
+  const status = issues.length ? 'potential-gap' : coherentSections
+    ? segments.length === 1 && unnumberedPages.length === 0
+      ? 'internally-consistent' : 'numbered-sections-consistent'
+    : 'not-establishable';
+
   return {
-    status: issues.length ? 'potential-gap' : coherentFullSequence ? 'internally-consistent' : 'not-establishable',
+    status,
     paperCompletenessVerified: false,
-    numberedPages, pdfPages: totalPages, failedPages, pages,
-    issues, // codes and page numbers only, never OCR text/PHI
-    sequenceGroups: segments.map(s => ({
-      firstPdfPage: s.first.pdfPage, lastPdfPage: s.last.pdfPage,
-      sequenceFirst: s.first.sequencePage, sequenceLast: s.last.sequencePage, declaredTotal: s.total
+    numberingRequired: false,
+    numberedPages, unnumberedPages,
+    pdfPages: totalPages, failedPages, pages,
+    issues, observations,
+    sequenceGroups: segments.map(part => ({
+      firstPdfPage: part.first.pdfPage, lastPdfPage: part.last.pdfPage,
+      sequenceFirst: part.first.sequencePage, sequenceLast: part.last.sequencePage,
+      declaredTotal: part.total,
+      internallyComplete: part.startsAtOne && part.last.sequencePage === part.total && !part.hasJump
     })),
-    limitation: 'Internal PDF pagination cannot establish the number of sheets in the original paper folder.'
+    limitation: 'Numbers are optional and may restart per visit/form. Internal PDF evidence does not prove the source-paper folder was complete.'
   };
 }
 
