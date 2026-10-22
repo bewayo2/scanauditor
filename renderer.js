@@ -506,7 +506,8 @@ function renderBulkProgress(p) {
   byId('bulk-failed').textContent = Number(p.analysisFailed || 0).toLocaleString('en-US');
   byId('bulk-progress-note').textContent = 'PDFs discovered this session: ' + Number(p.filesSeen || 0).toLocaleString('en-US') +
     '. Pages processed: ' + Number(p.pagesProcessed || 0).toLocaleString('en-US') +
-    '. ' + (p.stopped ? 'Stopped after current file. Select Start / Resume to continue.' : 'Checkpoint updated after each file.');
+    '. Metered API usage this session: ' + dollar(p.meteredSpendUSD || 0, 4) +
+    '. ' + (p.stopped ? 'Stopped after current file or configured limit. Select Start / Resume to continue.' : 'Checkpoint updated after each file.');
 }
 async function selectBulkFolder() {
   try {
@@ -534,9 +535,20 @@ async function startBulkAudit() {
   analysisMode.disabled = true;
   byId('bulk-progress-note').textContent = 'Scanning the selected folder. Work is checkpointed after each PDF.';
   try {
+    const maxFiles = Number(byId('bulk-max-files').value);
+    const maxUsd = Number(byId('bulk-max-usd').value);
+    if (!Number.isSafeInteger(maxFiles) || maxFiles < 1 || maxFiles > 1000000) {
+      showNotification('Enter a valid per-session file limit.', 'warning');
+      return;
+    }
+    if (mode !== 'local' && (!Number.isFinite(maxUsd) || maxUsd < 0.01 || maxUsd > 100000)) {
+      showNotification('Enter a positive cloud API spending limit.', 'warning');
+      return;
+    }
     const result = await window.electronAPI.runBulkAudit({
       mode, hospitalApproved: hospitalApproved.checked,
-      retryFailed: byId('bulk-retry-failed').checked
+      retryFailed: byId('bulk-retry-failed').checked,
+      maxFiles, maxUsd
     });
     renderBulkProgress(result);
     showNotification(result.stopped ? 'Folder audit paused. You can resume it.' : 'Folder audit completed.', 'success');
