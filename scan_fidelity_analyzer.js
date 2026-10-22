@@ -584,9 +584,14 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
     if (internalCompleteness?.issues?.length) {
       for (const issue of internalCompleteness.issues) {
         this.addFinding(findings, issue.code,
-          'Printed pagination suggests a gap or repeated page. Compare the affected pages against the source paper.',
+          'A numbered form or visit contains a possible page-sequence gap. Compare with the source; numbering is optional and may restart.',
           issue.pages);
       }
+    }
+    for (const observation of internalCompleteness?.observations || []) {
+      this.addFinding(informationalFindings, observation.code,
+        'Printed numbering may reflect a separate visit or form, or intervening unnumbered sheets. This is not proof of a missing paper page.',
+        observation.pages);
     }
     if (contentPreservation?.issues?.length) {
       for (const issue of contentPreservation.issues) {
