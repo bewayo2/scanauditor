@@ -47,6 +47,19 @@ function evidenceReport(result) {
       status: completeness.status || 'not-assessed',
       paperCompletenessVerified: false,
       numberedPages: Number(completeness.numberedPages) || 0,
+      numberingRequired: false,
+      unnumberedPages: Array.isArray(completeness.unnumberedPages)
+        ? completeness.unnumberedPages.filter(n => Number.isInteger(n) && n > 0) : [],
+      numberedSections: (completeness.sequenceGroups || []).map(x => ({
+        firstPdfPage: x.firstPdfPage, lastPdfPage: x.lastPdfPage,
+        sequenceFirst: x.sequenceFirst, sequenceLast: x.sequenceLast,
+        declaredTotal: x.declaredTotal, internallyComplete: Boolean(x.internallyComplete)
+      })),
+      observations: (completeness.observations || []).map(x => ({
+        code: safeCode(x.code), pages: pagesOf(x),
+        missingSequencePages: Array.isArray(x.missingSequencePages)
+          ? x.missingSequencePages.filter(n => Number.isInteger(n) && n > 0) : []
+      })),
       issues: (completeness.issues || []).map(x => ({
         code: safeCode(x.code), pages: pagesOf(x),
         missingSequencePages: Array.isArray(x.missingSequencePages) ?
