@@ -325,8 +325,21 @@ function createPreservationSummary(analysis) {
     'Internal checks assess only the PDF. They cannot establish that all sheets, signatures, or annotations on the paper original were digitized.'));
   if (completeness) {
     const count = completeness.numberedPages ?? 0;
+    const unnumbered = (completeness.unnumberedPages || []).length;
+    const groups = completeness.sequenceGroups || [];
     box.appendChild(el('div', 'finding-item',
-      'Printed pagination: ' + count + '/' + completeness.pdfPages + ' pages with a detected sequence. Internal status: ' + completeness.status + '.'));
+      'Numbered pages: ' + count + ' of ' + completeness.pdfPages +
+      '; unnumbered pages: ' + unnumbered +
+      '; identified numbered sections: ' + groups.length +
+      '. Internal status: ' + completeness.status +
+      '. Numbering can restart for each form or visit and is not required on continuation sheets.'));
+    for (const group of groups) {
+      box.appendChild(el('div', 'finding-item',
+        'Numbered section on PDF pages ' + group.firstPdfPage + '–' + group.lastPdfPage +
+        ': printed ' + group.sequenceFirst + ' through ' + group.sequenceLast +
+        ' of ' + group.declaredTotal +
+        (group.internallyComplete ? ' (internally consistent)' : ' (not fully verifiable)')));
+    }
     for (const issue of completeness.issues || []) {
       box.appendChild(el('div', 'finding-item',
         issue.code.replaceAll('_', ' ') + ' — PDF page(s) ' + issue.pages.join(', ') +
