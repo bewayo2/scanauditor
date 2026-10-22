@@ -127,3 +127,75 @@ test('OCR failure must not conceal independent blank-image evidence', () => {
   });
   assert.ok(r.issues.some(x => x.code === 'POSSIBLY_BLANK_PAGE'));
 });
+
+
+test('two complete visits plus unnumbered continuation and attachments do not trigger gaps', () => {
+  const pdfPages = [
+    ...labels([1,4],[2,4],[3,4],[4,4]),
+    'Handwritten continuation without printed pagination',
+    ...labels([1,6],[2,6],[3,6],[4,6],[5,6],[6,6]),
+    'Laboratory results without page number',
+    'Unnumbered consultation note'
+  ];
+  const result = analyzeInternalCompleteness(contexts(pdfPages), 13);
+  assert.equal(result.status, 'numbered-sections-consistent');
+  assert.equal(result.paperCompletenessVerified, false);
+  assert.equal(result.numberingRequired, false);
+  assert.deepEqual(result.unnumberedPages, [5,12,13]);
+  assert.equal(result.sequenceGroups.length, 2);
+  assert.ok(result.sequenceGroups.every(group => group.internallyComplete));
+  assert.deepEqual(result.issues, []);
+});
+
+test('two visits may both use Page 1 of 4 through Page 4 of 4', () => {
+  const pages = contexts(labels([1,4],[2,4],[3,4],[4,4],[1,4],[2,4],[3,4],[4,4]));
+  const result = analyzeInternalCompleteness(pages, 8);
+  assert.equal(result.status, 'numbered-sections-consistent');
+  assert.equal(result.sequenceGroups.length, 2);
+  assert.deepEqual(result.issues, []);
+});
+
+test('unnumbered continuation may occupy a skipped printed sequence number', () => {
+  const pdfPages = contexts([
+    ...labels([1,4],[2,4]),
+    'Unnumbered continuation notes',
+    ...labels([4,4])
+  ]);
+  const result = analyzeInternalCompleteness(pdfPages, 4);
+  assert.deepEqual(result.issues, []);
+  assert.equal(result.status, 'not-establishable');
+  assert.ok(result.observations.some(x => x.code === 'UNCONFIRMED_PAGE_NUMBER_JUMP'));
+  assert.deepEqual(result.unnumberedPages, [3]);
+});
+
+test('one numbered visit ending before another visit starts does not imply missing PDF pages', () => {
+  const pdfPages = contexts([
+    ...labels([1,4],[2,4]),
+    ...labels([1,6],[2,6],[3,6],[4,6],[5,6],[6,6])
+  ]);
+  const result = analyzeInternalCompleteness(pdfPages, 8);
+  assert.deepEqual(result.issues, []);
+  assert.equal(result.status, 'not-establishable');
+  assert.equal(result.sequenceGroups.length, 2);
+});
+
+test('ambiguous jump across unnumbered sheet stays informational, not review-required', () => {
+  const analyzer = new ScanFidelityAnalyzer();
+  const pdfPages = contexts([...labels([1,4],[2,4]), 'Unnumbered note', ...labels([4,4])]);
+  const text = analyzer.combinePageAnalyses(pdfPages.map(p => ({
+    pageNumber: p.pageNumber, success: true,
+    patientIdentifiers: { names: [], hospitalNumbers: [] }, dates: [], uncertainFindings: []
+  })), 4);
+  text.pageLinkage = { unresolvedPages: [], identifiedPages: [1], continuationPages: [2,3,4], failedPages: [] };
+  const images = {
+    complete: true, failedBatches: [], blurryPages: [], darkPages: [], lightPages: [],
+    unreadablePages: [], cutoffPages: [], incompletePages: [], upsideDownPages: [],
+    sidewaysPages: [], misalignedPages: [], exactDuplicateGroups: [],
+    possibleDuplicateGroups: [], visionDuplicateGroups: []
+  };
+  const qa = analyzer.evaluateQa(text, images, { complete: true, pages: [] },
+    analyzeInternalCompleteness(pdfPages, 4));
+  assert.equal(qa.status, 'passed');
+  assert.ok(qa.informationalFindings.some(x => x.code === 'UNCONFIRMED_PAGE_NUMBER_JUMP'));
+  assert.ok(!qa.findings.some(x => x.code === 'PRINTED_PAGE_SEQUENCE_GAP'));
+});
