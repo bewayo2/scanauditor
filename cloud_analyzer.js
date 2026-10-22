@@ -115,7 +115,7 @@ class CloudScanAnalyzer extends ConfiguredAnalyzer {
       blurryPages: [], darkPages: [], lightPages: [], unreadablePages: [],
       cutoffPages: [], incompletePages: [], upsideDownPages: [], sidewaysPages: [],
       misalignedPages: [], visionDuplicateGroups: [], exactDuplicateGroups: [],
-      possibleDuplicateGroups: [], qualityEvidence: []
+      possibleDuplicateGroups: [], qualityEvidence: [], contentAssessments: []
     };
     const flags = {
       blurry: 'blurryPages', dark: 'darkPages', light: 'lightPages',
@@ -133,6 +133,17 @@ class CloudScanAnalyzer extends ConfiguredAnalyzer {
       }
       for (const field of QUALITY_FIELDS) {
         if (result.quality[field] === true) combined[flags[field]].push(page);
+      }
+      // Only controlled, non-PHI categories leave the page cache.
+      if (result.contentFeatures && typeof result.contentFeatures === 'object') {
+        const states = new Set(['legible', 'uncertain', 'potentially-clipped', 'not-observed']);
+        const bounded = { pageNumber: page };
+        for (const field of ['printedText', 'handwriting', 'signatures', 'stamps', 'marginalNotes']) {
+          bounded[field] = states.has(result.contentFeatures[field]) ? result.contentFeatures[field] : 'not-observed';
+        }
+        bounded.documentEdges = ['visible', 'possible-clipping', 'unknown'].includes(result.contentFeatures.documentEdges)
+          ? result.contentFeatures.documentEdges : 'unknown';
+        combined.contentAssessments.push(bounded);
       }
       // These are controlled categories only; never persist free-form OCR or PHI.
       for (const observation of Array.isArray(result.qualityObservations) ? result.qualityObservations : []) {
