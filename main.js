@@ -333,8 +333,10 @@ ipcMain.handle('run-bulk-audit', async (_event, request) => {
       mode, apiKey: sessionOpenAIKey,
       hospitalApproved: request?.hospitalApproved === true,
       retryFailed: request?.retryFailed === true,
-      maxFiles: Number.isSafeInteger(request?.maxFiles) && request.maxFiles > 0
-        ? request.maxFiles : Infinity,
+      maxFiles: Number.isSafeInteger(request?.maxFiles) && request.maxFiles > 0 && request.maxFiles <= 1000000
+        ? request.maxFiles : 100,
+      maxUsd: Number.isFinite(request?.maxUsd) && request.maxUsd >= 0.01 && request.maxUsd <= 100000
+        ? request.maxUsd : 5,
       cancellation,
       onProgress: progress => {
         if (mainWindow && !mainWindow.isDestroyed()) {
