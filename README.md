@@ -66,7 +66,7 @@ ScanAuditor now checks **internal PDF pagination gaps** (not completeness agains
 
 The user can select **Local only**, **GPT-6 Luna with GPT-6.1 Sol fallback**, or **GPT-6 Astra benchmark**. One cloud multimodal request per page extracts text, patient fields, dates, and quality observations. The app only sends medical images externally when cloud mode is explicitly selected, an API key has been entered, and hospital authorization is confirmed. The API key is kept in memory for this session, not persisted.
 
-The **Scan Cost Tracker** automatically totals the pages in the most recent PDF analysis run, estimates that run's API spend and cost per page, and separately shows cumulative API spend across runs. An optional future-page count can be entered for extrapolation, but there is no fixed 100,000-record default. It is not a billing invoice. For setup, rates and privacy requirements, read [OPENAI_SETUP.md](OPENAI_SETUP.md).
+The **Scan Cost Tracker** forecasts costs **per page, not per PDF**: enter the total number of pages expected and click **Estimate Cost**. It uses the latest comparable run's observed dollars per metered page by default, while keeping selected-run and historical averages in Advanced Options. PDF file counts do not determine the forecast. The app separately displays actual recorded spending and never makes an API call merely to calculate an estimate. It is not a billing invoice. For setup, rates and privacy requirements, read [OPENAI_SETUP.md](OPENAI_SETUP.md).
 
 ## Prerequisites
 

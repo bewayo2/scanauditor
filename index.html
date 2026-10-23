@@ -49,19 +49,19 @@
       <section class="cost-section" aria-labelledby="cost-heading">
         <div class="section-header">
           <h2 id="cost-heading">Estimate Scanning Cost</h2>
-          <p>Enter how many PDF files the organization plans to process. The estimate uses the latest matching scan automatically. No files are processed or charged when you calculate.</p>
+          <p>Estimate by scanned pages, not PDFs. Each PDF may contain a different number of pages. The default rate comes from the latest matching scan; calculating an estimate does not process files or incur API charges.</p>
         </div>
 
         <div class="cost-simple">
-          <label for="forecast-target-files">How many PDF files do you need to process?</label>
+          <label for="forecast-target-pages">How many pages do you need to process?</label>
           <div class="cost-simple-input">
-            <input type="number" id="forecast-target-files" min="1" max="100000000" step="1" inputmode="numeric" placeholder="e.g. 1000000" />
+            <input type="number" id="forecast-target-pages" min="1" max="100000000" step="1" inputmode="numeric" placeholder="e.g. 1000000" />
             <button id="save-cost-plan" type="button" class="btn btn-primary">Estimate Cost</button>
           </div>
           <div class="cost-estimate-result" role="status" aria-live="polite" aria-atomic="true">
             <span>Estimated total API cost</span>
-            <strong id="cost-file-estimate">—</strong>
-            <p id="cost-target-files-projection" class="small-note">Enter a number of files to see an estimate based on your scan results.</p>
+            <strong id="cost-page-estimate">—</strong>
+            <p id="cost-target-projection" class="small-note">Enter the number of pages to calculate an estimated API cost per page.</p>
           </div>
         </div>
 
@@ -75,16 +75,15 @@
             <strong id="cost-spent">—</strong>
           </div>
         </div>
-        <p class="small-note">Estimated API charges only, not an invoice. A small or unusual scan sample can produce an unreliable project-wide estimate.</p>
+        <p class="small-note">Estimated API charges only, not an invoice. A small or unusual page sample can produce an unreliable project-wide estimate.</p>
 
         <details class="cost-advanced" id="cost-advanced">
           <summary>Advanced Options &amp; Cost History</summary>
           <div class="cost-advanced-inner">
-            <p class="small-note">Optional: compare a specific run, use a historical average, estimate by pages, or change token assumptions. Click <strong>Estimate Cost</strong> above to apply changes.</p>
+            <p class="small-note">Optional: compare an individual run, use an average across past runs, or adjust token assumptions. Every forecast remains based on pages. Click <strong>Estimate Cost</strong> above to apply changes.</p>
             <div class="cost-planning">
               <div><label for="forecast-basis">Calculate using</label><select id="forecast-basis"><option value="latest-run">Latest matching run (default)</option><option value="selected-run">One selected run only</option><option value="historical">Historical average</option></select></div>
               <div id="cost-run-selector"><label for="forecast-selected-run">Choose a run</label><select id="forecast-selected-run"><option value="">Choose a previous run</option></select></div>
-              <div><label for="forecast-target-pages">Optional future target (pages)</label><input type="number" id="forecast-target-pages" min="1" max="100000000" step="1" placeholder="Leave blank" /></div>
               <div><label for="planning-input-tokens">Assumed input tokens / page</label><input type="number" id="planning-input-tokens" min="1" max="1000000" step="100" value="5000" /></div>
               <div><label for="planning-output-tokens">Assumed output tokens / page</label><input type="number" id="planning-output-tokens" min="1" max="100000" step="100" value="500" /></div>
               <div><label for="fallback-percent">Assumed Sol fallback %</label><input type="number" id="fallback-percent" min="0" max="100" step="1" value="10" /></div>
@@ -96,8 +95,7 @@
               <div class="cost-card"><span>Estimated total for last run</span><strong id="cost-total">—</strong></div>
             </div>
             <p id="cost-basis" class="small-note">Run a PDF to see a breakdown of its API costs.</p>
-            <p id="cost-target-projection" class="small-note">Future-page forecast: none entered.</p>
-            <p class="small-note">If pages had no reported API token usage, missing costs may be estimated separately. The historical file-rate estimate uses completed metered runs only.</p>
+            <p class="small-note">If pages have no recorded API token usage, estimates may use documented token assumptions. Historical rates are weighted by metered pages, not by PDF file counts.</p>
             <details class="cost-reset-area">
               <summary>Reset cost history</summary>
               <p class="small-note">This permanently deletes this computer's recorded API usage, run history and saved forecast settings after confirmation. Actual provider charges, PDFs, QA evidence and batch checkpoints are not affected.</p>
