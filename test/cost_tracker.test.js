@@ -396,3 +396,44 @@ test('latest unmetered run uses historical fallback and reports its historical s
   assert.equal(result.historicalFileCount, 1);
   assert.ok(Math.abs(result.targetFilesProjectionUSD - 38814) < 1e-6);
 });
+
+
+test('page-based budget is independent of PDF files per scan', () => {
+  const entries = fourPageCostRun('page-sample');
+  const budget = { ...plan, targetPages: 1000000, targetFiles: null };
+  const oneFile = { runId: 'page-sample', mode: 'tiered', fileCount: 1, totalPages: 4 };
+  const manyFiles = { ...oneFile, fileCount: 4 };
+  const first = summarizeCost(entries, budget, 'tiered', oneFile, [oneFile]);
+  const second = summarizeCost(entries, budget, 'tiered', manyFiles, [manyFiles]);
+  assert.equal(first.targetForecastSource, 'latest-run');
+  assert.equal(second.targetForecastSource, 'latest-run');
+  assert.equal(first.targetProjectionUSD, second.targetProjectionUSD);
+  assert.ok(Math.abs(first.targetProjectionUSD - 9703.5) < 1e-6);
+});
+
+test('single-run page forecast ignores the unrelated historical PDF and page totals', () => {
+  const earlier = fourPageCostRun('old');
+  const sample = Array.from({ length: 2 }, (_, i) => ({
+    runId: 'selected', model: 'gpt-6-luna', pageKey: 'selected:' + i,
+    usage: { input_tokens: 5000, output_tokens: 500 }
+  }));
+  const records = [
+    { runId: 'old', mode: 'tiered', totalPages: 4, fileCount: 1 },
+    { runId: 'selected', mode: 'tiered', totalPages: 2, fileCount: 2 }
+  ];
+  const d = summarizeCost([...earlier, ...sample], {
+    ...plan, forecastBasis: 'selected-run', selectedRunId: 'selected',
+    targetPages: 1000000
+  }, 'tiered', records[1], records);
+  assert.equal(d.targetForecastSource, 'selected-run');
+  assert.ok(Math.abs(d.targetForecastPerPageUSD - 0.00075) < 1e-10);
+  assert.ok(Math.abs(d.targetProjectionUSD - 750) < 1e-6);
+  assert.ok(d.recordedSpendUSD > d.run.recordedSpendUSD);
+});
+
+test('pagewise budget after history reset uses planning estimate rather than a file count', () => {
+  const d = summarizeCost([], { ...plan, targetPages: 1000000, targetFiles: null }, 'tiered');
+  assert.equal(d.targetForecastSource, 'planning-assumption');
+  assert.ok(Math.abs(d.targetForecastPerPageUSD - 0.00225) < 1e-12);
+  assert.ok(Math.abs(d.targetProjectionUSD - 2250) < 1e-6);
+});
