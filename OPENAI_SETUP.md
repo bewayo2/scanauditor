@@ -16,12 +16,17 @@ Enter a hospital-owned key in the API field, then click Use Key. The key goes to
 
 ## Cost tracker — actual pages in each run
 
-### Simple estimate for staff
+### Simple page-based estimate for staff
 
-The default cost view asks one question: **How many PDF files do you need to process?** Enter the count and click **Estimate Cost**. ScanAuditor displays one estimated total, the cost per file, the reference sample and a reminder that calculating does not make API calls. It defaults to the latest matching scan run. The last run and the cumulative tracked spend appear as two smaller reference figures.
+The default calculator asks one question: **How many scanned pages do you need to process?** Enter the count (for example, 1,000,000) and click **Estimate Cost**. The display shows:
 
-To select a specific previous run, calculate using a historical average, estimate by pages, or adjust assumed token prices, open **Advanced Options & Cost History**. The chosen-run dropdown appears only when **One selected run only** is selected. Existing saved forecast settings and the full local usage ledger are preserved. Click Estimate Cost again to apply changes. Reset All Cost History is intentionally nested under Advanced Options and a second Reset cost history disclosure; it still requires the Electron main-process confirmation dialog.
+- The forecasted dollar total for that many **pages**, the estimated API cost **per page**, and the source of the estimate.
+- The number of metered pages in the reference run, or number of page-runs in the historical sample.
+- A short summary of the latest scan and cumulative tracked API spending.
 
+The default is the **latest matching run's observed dollars per metered page**. The number of PDF files is never multiplied into the forecast because PDFs vary in length. If a run contains four pages and costs $0.038814, the observed rate is $0.0097035 per page; 1,000,000 pages would be **$9,703.50** at that rate, regardless of how many PDFs hold those future pages. A small sample may not be representative.
+
+Open **Advanced Options & Cost History** only when you want to choose a specific run, compare a historical per-page average, or adjust token-planning assumptions. The selected-run dropdown appears only when that method is chosen. Older saved page targets, cost records, and historical data are preserved. Clicking Estimate Cost does **not** trigger any API call. Reset All Cost History is tucked behind two disclosure controls and requires an additional system confirmation.
 
 The cost dashboard is scoped to the **most recent scan run**, not a fixed number of files or pages. If you process a single four-page PDF, the run contains **four pages**. If you process three PDFs with 5, 12 and 8 pages, the run contains **25 pages**. The PDF page totals come from the analyzer after each run, not from a guessed records-per-project setting. If a file cannot be opened and its page count is unknown, the dashboard warns that some page counts are unavailable.
 
@@ -34,17 +39,17 @@ The dashboard shows:
 
 Example: one 12-page cloud PDF uses exactly 12 pages for its own total. The app never multiplies that by 100,000 records automatically.
 
-### Projecting future files from a chosen scan run
+### Pagewise calculation methods
 
-The cost tracker also has an **optional future target (files)**. The app uses the **actual count of PDFs in the reference run**, not a hard-coded pages-per-file assumption. For example, if a cloud run processed 4 PDF pages in 1 file and cost $0.038814, projecting 1,000,000 **files** from only that run yields $38,814 (assuming similar files). Projecting 1,000,000 **pages** from the same run yields $9,703.50. These are different budgets and neither is a billing invoice.
+- **Latest matching run (default):** observed spending / number of metered pages in the latest comparable cloud run.
+- **One selected run only:** choose a previous run; its cost / its metered page count is used without including older runs. If that run has no usable metered page data, no estimate is shown.
+- **Historical average across runs:** combined matching cloud spend / number of distinct metered **(run, page)** pairs. Repeated scans count as additional page-processing events.
+- **Local mode:** $0 OpenAI API charges (hardware and electricity are not included).
+- **No observed paid pages:** the default or historical modes may show a clearly labeled **planning assumption** based on the estimated input/output tokens per page and fallback percentage in Advanced Options.
 
-- **Latest matching run (default):** Uses the most recently recorded run in the selected model mode for both page and file costing.
-- **Only a selected run (ignore history):** Pick a prior run by timestamp, model mode, and actual file/page count. The file projection uses only its cost and file count. Historical charges never enter that estimate. If the run lacks usable metered data or its mode does not match, the forecast displays **unavailable** rather than silently using the full history.
-- **Historical average across runs:** Uses observed token spend divided by **all fully metered files** in matching-model runs, weighted by the actual number of files per run. Runs with incomplete API usage are excluded from the historical per-file rate. The older historical **per-page** calculation remains separate.
-- File projections require a recorded run with an actual file count. If no paid usage was observed, the app cannot infer cost per file merely from token assumptions: that would require guessing pages per file.
-- Neither selecting a run nor choosing a forecasting method changes actual cumulative spending. Local-only mode forecasts $0 in OpenAI charges, excluding hardware and electricity.
+Old file-based target settings from previous ScanAuditor versions are not used by the new interface. The next pagewise estimate clears any previously saved file target while preserving actual historical spending and run records.
 
-**Reset All Cost History** permanently deletes this computer's locally recorded API token-usage ledger, the run-cost history, and saved cost assumptions after a warning and confirmation. The cost tracker then starts with zero recorded spending and no selected samples. **It does not erase actual OpenAI bills or previously incurred charges**, patient PDFs, QA reports, or resumable batch checkpoints. Reset is disabled while an individual or folder audit is active. Cost records collected by a separate CLI process or on another computer are not coordinated by the desktop reset.
+**Reset All Cost History** permanently clears this computer's local usage and run ledgers and forecast settings only after warning and confirmation. It does not reverse provider charges or delete PDFs, QA evidence, or batch checkpoints. Resets are blocked during an active desktop scan or folder audit.
 
 An **optional future target (pages)** may be entered when you want to extrapolate the expected price of many *future pages*. Leaving it blank displays no future-project estimate. This separate target does not change the last-run cost or page count.
 
