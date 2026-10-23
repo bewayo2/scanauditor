@@ -16,6 +16,13 @@ Enter a hospital-owned key in the API field, then click Use Key. The key goes to
 
 ## Cost tracker — actual pages in each run
 
+### Simple estimate for staff
+
+The default cost view asks one question: **How many PDF files do you need to process?** Enter the count and click **Estimate Cost**. ScanAuditor displays one estimated total, the cost per file, the reference sample and a reminder that calculating does not make API calls. It defaults to the latest matching scan run. The last run and the cumulative tracked spend appear as two smaller reference figures.
+
+To select a specific previous run, calculate using a historical average, estimate by pages, or adjust assumed token prices, open **Advanced Options & Cost History**. The chosen-run dropdown appears only when **One selected run only** is selected. Existing saved forecast settings and the full local usage ledger are preserved. Click Estimate Cost again to apply changes. Reset All Cost History is intentionally nested under Advanced Options and a second Reset cost history disclosure; it still requires the Electron main-process confirmation dialog.
+
+
 The cost dashboard is scoped to the **most recent scan run**, not a fixed number of files or pages. If you process a single four-page PDF, the run contains **four pages**. If you process three PDFs with 5, 12 and 8 pages, the run contains **25 pages**. The PDF page totals come from the analyzer after each run, not from a guessed records-per-project setting. If a file cannot be opened and its page count is unknown, the dashboard warns that some page counts are unavailable.
 
 The dashboard shows:
