@@ -230,3 +230,13 @@ test('previously checkpointed PDFs increment skip count and preserve processed-p
   assert.equal(resumed.phase, 'completed');
   assert.ok(events.some(x => x.phase === 'completed' && x.skippedFromCheckpoint === 1));
 });
+
+
+test('an empty selected folder shows exactly zero PDFs and zero anticipated pages', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'scanauditor-empty-inventory-'));
+  t.after(async () => fs.remove(dir));
+  const result = await inspectBulkFolder({ root: dir });
+  assert.equal(result.filesTotal, 0);
+  assert.equal(result.estimatedPages, 0);
+  assert.equal(result.estimateKind, 'exact-metadata');
+});
