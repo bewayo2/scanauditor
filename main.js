@@ -22,6 +22,8 @@ let mainWindow;
 let sessionOpenAIKey = null;
 let selectedBulkRoot = null;
 let activeBulk = null;
+let activeAnalysis = false;
+let costResetPending = false;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -247,12 +249,37 @@ ipcMain.handle('get-cost-dashboard', (_event, mode) => {
   return costTracker.getDashboard(app.getPath('userData'), ['local', 'tiered', 'astra'].includes(mode) ? mode : 'tiered');
 });
 ipcMain.handle('save-cost-plan', async (_event, plan) => {
+  if (costResetPending) throw new Error('Cost history reset in progress.');
   await costTracker.savePlan(app.getPath('userData'), plan);
   return costTracker.getDashboard(app.getPath('userData'), 'tiered');
 });
 
+ipcMain.handle('reset-cost-history', async () => {
+  if (activeAnalysis || activeBulk || costResetPending) {
+    throw new Error('Stop active analyses before resetting cost history.');
+  }
+  costResetPending = true;
+  try {
+    const confirmation = await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      buttons: ['Cancel', 'Delete All Local Cost History'],
+      defaultId: 0, cancelId: 0, noLink: true,
+      title: 'Reset All ScanAuditor Costs',
+      message: 'Delete all locally tracked API cost history?',
+      detail: 'This permanently removes local usage records, run-cost history, and saved forecast assumptions. ' +
+        'It does not erase hospital/provider invoices, QA audit evidence, patient PDFs, or folder-audit checkpoints.'
+    });
+    if (confirmation.response !== 1) return { cleared: false, canceled: true };
+    await costTracker.resetCostHistory(app.getPath('userData'));
+    return { cleared: true };
+  } finally {
+    costResetPending = false;
+  }
+});
 ipcMain.handle('analyze-files', async (_event, request) => {
-  if (activeBulk) throw new Error('A folder-wide audit is active. Stop it before running individual files.');
+  if (activeBulk || activeAnalysis || costResetPending) {
+    throw new Error('Another scan or cost-history reset is active.');
+  }
   const filePaths = Array.isArray(request) ? request : request?.filePaths;
   const mode = Array.isArray(request) ? 'local' : request?.mode || 'local';
   if (!Array.isArray(filePaths) || filePaths.length === 0) throw new Error('No files selected.');
@@ -261,6 +288,8 @@ ipcMain.handle('analyze-files', async (_event, request) => {
   if (mode !== 'local' && (!sessionOpenAIKey || request?.hospitalApproved !== true)) {
     throw new Error('Hospital authorization and a hospital-owned API key are required for cloud processing.');
   }
+  activeAnalysis = true;
+  try {
   const runId = crypto.randomUUID();
   const analyzer = mode === 'local'
     ? new ConfiguredAnalyzer()
@@ -300,6 +329,9 @@ ipcMain.handle('analyze-files', async (_event, request) => {
     console.error('[ScanAuditor] cost_run_record_failed');
   }
   return { results, runId };
+  } finally {
+    activeAnalysis = false;
+  }
 });
 
 ipcMain.handle('select-bulk-folder', async () => {
@@ -317,7 +349,7 @@ ipcMain.handle('stop-bulk-audit', () => {
   return { stopping: Boolean(activeBulk) };
 });
 ipcMain.handle('run-bulk-audit', async (_event, request) => {
-  if (activeBulk) throw new Error('A folder-wide audit is already running.');
+  if (activeBulk || activeAnalysis || costResetPending) throw new Error('A scan or reset is already running.');
   if (!selectedBulkRoot) throw new Error('Choose a folder of PDFs first.');
   const mode = request?.mode || 'local';
   if (!['local', 'tiered', 'astra'].includes(mode)) throw new Error('Unsupported mode.');
