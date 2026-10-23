@@ -381,3 +381,18 @@ test('global cost reset clears all local runs, token usage, and assumptions with
   await recordRun(dir, { runId: 'new', mode: 'local', fileCount: 1, totalPages: 1 });
   assert.equal((await listRuns(dir)).length, 1);
 });
+
+
+test('latest unmetered run uses historical fallback and reports its historical sample', () => {
+  const entries = fourPageCostRun('previous');
+  const runs = [
+    { runId: 'previous', mode: 'tiered', fileCount: 1, totalPages: 4 },
+    { runId: 'new-empty', mode: 'tiered', fileCount: 2, totalPages: 8 }
+  ];
+  const result = summarizeCost(entries, { ...plan, targetFiles: 1000000 }, 'tiered',
+    runs[1], runs);
+  assert.equal(result.targetForecastSource, 'historical-fallback');
+  assert.equal(result.forecastFileSample, null);
+  assert.equal(result.historicalFileCount, 1);
+  assert.ok(Math.abs(result.targetFilesProjectionUSD - 38814) < 1e-6);
+});
