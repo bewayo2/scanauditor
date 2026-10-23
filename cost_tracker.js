@@ -169,6 +169,7 @@ function summarizeCost(entries, plan, mode = 'tiered', lastRun = null, runs = []
   const historicalFileSpendUSD = historicalFileSamples.reduce((sum, item) => sum + item.recordedSpendUSD, 0);
   const historicalPerFile = historicalFileCount ? historicalFileSpendUSD / historicalFileCount : null;
 
+  const historicalPerPage = historicalPages.size ? historicalSpendUSD / historicalPages.size : null;
   let targetPerPage;
   let targetPerFile;
   let targetForecastSource;
@@ -187,7 +188,6 @@ function summarizeCost(entries, plan, mode = 'tiered', lastRun = null, runs = []
     targetPerFile = latestMatching.forecastPerFileUSD;
     targetForecastSource = 'latest-run';
   } else {
-    const historicalPerPage = historicalPages.size ? historicalSpendUSD / historicalPages.size : null;
     targetPerPage = historicalPerPage === null ? planningPerPage(p, mode) : historicalPerPage;
     targetPerFile = historicalPerFile;
     targetForecastSource = historicalPerPage === null ? 'planning-assumption' :
