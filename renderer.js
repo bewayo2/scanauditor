@@ -24,7 +24,6 @@ const apiKeyStatus = byId('openai-key-status');
 const hospitalApproved = byId('hospital-approved');
 const costFields = {
   targetPages: byId('forecast-target-pages'),
-  targetFiles: byId('forecast-target-files'),
   forecastBasis: byId('forecast-basis'),
   selectedRunId: byId('forecast-selected-run'),
   estimatedInputTokensPerPage: byId('planning-input-tokens'),
@@ -642,8 +641,8 @@ async function refreshCostDashboard() {
   const run = dashboard.run;
   byId('cost-run-summary').textContent = !run
     ? 'No scans recorded yet'
-    : Number(run.fileCount).toLocaleString('en-US') + ' PDF file(s) · ' +
-      Number(run.totalPages).toLocaleString('en-US') + ' pages · ' +
+    : Number(run.totalPages).toLocaleString('en-US') + ' pages (' +
+      Number(run.fileCount).toLocaleString('en-US') + ' PDF file(s)) · ' +
       dollar(run.recordedSpendUSD, 6) + ' (' + run.mode + ')';
   byId('cost-spent').textContent = dollar(dashboard.recordedSpendUSD,
     dashboard.recordedSpendUSD < 0.01 ? 6 : 2);
@@ -669,65 +668,51 @@ async function refreshCostDashboard() {
     const option = document.createElement('option');
     option.value = item.runId;
     const date = item.timestamp ? item.timestamp.slice(0, 16).replace('T', ' ') : 'Undated';
-    option.textContent = date + ' — ' + Number(item.fileCount).toLocaleString('en-US') +
-      ' file(s), ' + Number(item.totalPages).toLocaleString('en-US') +
-      ' pages, ' + dollar(item.recordedSpendUSD, 6) +
-      (item.fileRateAvailable ? '' : ' (insufficient metered data)');
+    option.textContent = date + ' — ' + Number(item.totalPages).toLocaleString('en-US') +
+      ' pages (' + Number(item.fileCount).toLocaleString('en-US') + ' file(s)), ' +
+      dollar(item.recordedSpendUSD, 6) +
+      (mode !== 'local' && !item.meteredPages ? ' (no metered page usage)' : '');
     selector.appendChild(option);
   }
   selector.value = dashboard.plan.selectedRunId || '';
   if (selector.selectedIndex === -1) selector.value = '';
   syncCostRunSelector();
   const forecastSources = {
-    'latest-run': 'latest recorded run in this model mode',
-    'selected-run': 'only the chosen run; older runs excluded',
-    'selected-run-unavailable': 'selected-run data unavailable; no historical fallback',
-    'historical': 'historical average across matching runs',
-    'historical-fallback': 'historical average because no comparable latest run exists',
-    'planning-assumption': 'token-based assumptions (no comparable paid page data)',
+    'latest-run': 'the latest matching scan',
+    'selected-run': 'only the selected scan run',
+    'selected-run-unavailable': 'no matching metered run selected',
+    'historical': 'the page-weighted historical average',
+    'historical-fallback': 'the page-weighted historical average (latest run lacked usage)',
+    'planning-assumption': 'token-based planning assumptions (no metered page sample)',
     'local': 'local processing (no OpenAI API charges)'
   };
-  const sourceText = forecastSources[dashboard.targetForecastSource] || 'available samples';
-  byId('cost-target-projection').textContent = dashboard.targetPages === null
-    ? 'Future-page forecast: none entered.'
-    : dashboard.targetProjectionUSD === null
-      ? 'For ' + Number(dashboard.targetPages).toLocaleString('en-US') +
-        ' pages: unavailable. Choose a matching run with measured page usage.'
-      : 'Optional ' + Number(dashboard.targetPages).toLocaleString('en-US') +
-        '-page forecast (' + mode + '): ' + dollar(dashboard.targetProjectionUSD) +
-        ' at ' + dollar(dashboard.targetForecastPerPageUSD, 8) + '/page using ' +
-        sourceText + '.';
-  const amount = byId('cost-file-estimate');
-  if (dashboard.targetFiles === null) {
+  const amount = byId('cost-page-estimate');
+  const description = byId('cost-target-projection');
+  if (dashboard.targetPages === null) {
     amount.textContent = '—';
-    byId('cost-target-files-projection').textContent =
-      'Enter the number of PDF files you want to budget for, then click Estimate Cost.';
-  } else if (dashboard.targetFilesProjectionUSD === null) {
+    description.textContent = 'Enter the total number of scanned pages, then click Estimate Cost.';
+  } else if (dashboard.targetProjectionUSD === null) {
     amount.textContent = 'Estimate unavailable';
-    byId('cost-target-files-projection').textContent =
-      'No usable ' + mode + ' scan sample for this method. Analyze a few representative files or choose another run in Advanced Options. No charge was made.';
+    description.textContent = 'No usable metered page data for the selected run. Choose another scan in Advanced Options or collect a new sample. Calculating never incurs an API charge.';
   } else {
-    amount.textContent = dollar(dashboard.targetFilesProjectionUSD);
-    const basis = dashboard.targetForecastSource;
-    const basisText = basis === 'selected-run' ? 'the selected scan run'
-      : basis === 'latest-run' ? 'the latest matching scan run'
-        : basis === 'historical' || basis === 'historical-fallback'
-          ? 'the historical average across matching runs'
-          : 'local processing (no OpenAI API charges)';
-    const sampleText = dashboard.forecastFileSample
-      ? ' Reference: ' + Number(dashboard.forecastFileSample.fileCount).toLocaleString('en-US') +
-        ' file(s), ' + Number(dashboard.forecastFileSample.totalPages).toLocaleString('en-US') +
-        ' pages.'
-      : basis === 'historical' || basis === 'historical-fallback'
-        ? ' Historical sample: ' + Number(dashboard.historicalFileCount || 0).toLocaleString('en-US') +
-          ' metered file(s).' : '';
-    byId('cost-target-files-projection').textContent =
-      Number(dashboard.targetFiles).toLocaleString('en-US') + ' files × ' +
-      dollar(dashboard.targetForecastPerFileUSD, 6) + ' per file, based on ' +
-      basisText + '.' + sampleText +
-      (dashboard.forecastFileSample?.estimatedUnmeteredPages
-        ? ' Some pages lacked usage and were estimated.' : '') +
-      ' This is a forecast, not an API charge.';
+    const source = forecastSources[dashboard.targetForecastSource] || 'available sample data';
+    const count = Number(dashboard.targetPages).toLocaleString('en-US');
+    const perPage = dollar(dashboard.targetForecastPerPageUSD, 8);
+    let sample = '';
+    if (['latest-run', 'selected-run'].includes(dashboard.targetForecastSource) &&
+        dashboard.forecastFileSample) {
+      const reference = dashboard.forecastFileSample;
+      sample = ' Reference: ' + Number(reference.meteredPages).toLocaleString('en-US') +
+        ' metered pages in a ' + Number(reference.totalPages).toLocaleString('en-US') +
+        '-page scan run.';
+    } else if (['historical', 'historical-fallback'].includes(dashboard.targetForecastSource)) {
+      sample = ' Historical sample: ' + Number(dashboard.historicalMeteredPages).toLocaleString('en-US') +
+        ' metered page-runs across ' + Number(dashboard.historicalMeteredRuns).toLocaleString('en-US') +
+        ' runs.';
+    }
+    amount.textContent = dollar(dashboard.targetProjectionUSD);
+    description.textContent = count + ' pages × ' + perPage + ' per page, based on ' +
+      source + '.' + sample + ' This is a forecast, not an API charge.';
   }
   return dashboard;
 }
@@ -758,23 +743,11 @@ async function clearApiKey() {
   apiKeyStatus.textContent = 'No API key configured. The key is not saved to disk.';
 }
 async function saveCostSettings() {
-  const fileInput = byId('forecast-target-files');
   const pageInput = byId('forecast-target-pages');
-  if (fileInput.value && (!Number.isSafeInteger(Number(fileInput.value)) ||
-      Number(fileInput.value) < 1 || Number(fileInput.value) > 100000000)) {
-    showNotification('Enter a whole number of files between 1 and 100,000,000.', 'warning');
-    fileInput.focus();
-    return;
-  }
-  if (pageInput.value && (!Number.isSafeInteger(Number(pageInput.value)) ||
-      Number(pageInput.value) < 1 || Number(pageInput.value) > 100000000)) {
-    showNotification('Enter a valid number of pages in Advanced Options.', 'warning');
+  if (!pageInput.value || !Number.isSafeInteger(Number(pageInput.value)) ||
+      Number(pageInput.value) < 1 || Number(pageInput.value) > 100000000) {
+    showNotification('Enter a whole number of pages between 1 and 100,000,000.', 'warning');
     pageInput.focus();
-    return;
-  }
-  if (!fileInput.value && !pageInput.value) {
-    showNotification('Enter the number of files to estimate, or a page target in Advanced Options.', 'warning');
-    fileInput.focus();
     return;
   }
   const plan = {};
@@ -782,6 +755,9 @@ async function saveCostSettings() {
     plan[key] = key === 'forecastBasis' || key === 'selectedRunId' ? input.value
       : input.value === '' ? null : Number(input.value);
   }
+  // Migration from older file-based forecasts: keep the cost ledger, but
+  // clear any outdated file-count target whenever new page settings are saved.
+  plan.targetFiles = null;
   try {
     await window.electronAPI.saveCostPlan(plan);
     const dashboard = await refreshCostDashboard();
@@ -807,7 +783,7 @@ byId('save-openai-key').addEventListener('click', configureApiKey);
 byId('clear-openai-key').addEventListener('click', clearApiKey);
 byId('save-cost-plan').addEventListener('click', saveCostSettings);
 byId('forecast-basis').addEventListener('change', syncCostRunSelector);
-byId('forecast-target-files').addEventListener('keydown', event => {
+byId('forecast-target-pages').addEventListener('keydown', event => {
   if (event.key === 'Enter') saveCostSettings();
 });
 byId('reset-cost-history').addEventListener('click', resetCostHistory);
