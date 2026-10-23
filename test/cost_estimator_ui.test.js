@@ -11,19 +11,21 @@ const start = html.indexOf('<section class="cost-section"');
 const end = html.indexOf('<section class="file-section"', start);
 const section = html.slice(start, end);
 
-test('file-first cost screen exposes one estimate input and hides all complexity by default', () => {
+test('page-first cost screen exposes one page target and hides advanced controls by default', () => {
   const advanced = section.indexOf('<details class="cost-advanced"');
-  const firstFileInput = section.indexOf('id="forecast-target-files"');
+  const firstPageInput = section.indexOf('id="forecast-target-pages"');
   const action = section.indexOf('id="save-cost-plan"');
-  const estimate = section.indexOf('id="cost-file-estimate"');
+  const estimate = section.indexOf('id="cost-page-estimate"');
   assert.ok(start >= 0 && end > start);
-  assert.ok(firstFileInput > 0 && firstFileInput < advanced);
-  assert.ok(action > firstFileInput && action < advanced);
+  assert.ok(firstPageInput > 0 && firstPageInput < advanced);
+  assert.ok(action > firstPageInput && action < advanced);
   assert.ok(estimate > action && estimate < advanced);
-  assert.match(section.slice(0, advanced), /How many PDF files do you need to process\?/);
+  assert.match(section.slice(0, advanced), /How many pages do you need to process\?/);
   assert.match(section.slice(0, advanced), /Estimated total API cost/);
   assert.equal((section.slice(0, advanced).match(/<input\b/g) || []).length, 1);
-  for (const id of ['forecast-basis', 'forecast-selected-run', 'forecast-target-pages',
+  assert.ok(!section.includes('id="forecast-target-files"'));
+  assert.ok(!section.includes('id="cost-file-estimate"'));
+  for (const id of ['forecast-basis', 'forecast-selected-run',
     'planning-input-tokens', 'planning-output-tokens', 'fallback-percent']) {
     assert.ok(section.indexOf('id="' + id + '"') > advanced, id + ' should only be in Advanced Options');
   }
@@ -41,14 +43,17 @@ test('cost reset requires two disclosures and retains the existing server confir
   assert.match(main, /dialog\.showMessageBox/);
 });
 
-test('simple forecast still uses the saved run-specific file rate and keeps page forecast', () => {
-  assert.match(script, /dashboard\.targetFilesProjectionUSD/);
-  assert.match(script, /dashboard\.targetForecastPerFileUSD/);
-  assert.match(script, /dashboard\.forecastFileSample/);
-  assert.match(script, /dashboard\.historicalFileCount/);
+test('primary cost forecast only depends on observed or assumed page rate', () => {
   assert.match(script, /dashboard\.targetProjectionUSD/);
+  assert.match(script, /dashboard\.targetForecastPerPageUSD/);
+  assert.match(script, /dashboard\.targetPages/);
+  assert.match(script, /dashboard\.historicalMeteredPages/);
+  assert.match(script, /dashboard\.forecastFileSample/);
   assert.match(script, /syncCostRunSelector/);
-  assert.match(script, /byId\('cost-file-estimate'\)/);
+  assert.match(script, /byId\('cost-page-estimate'\)/);
+  assert.doesNotMatch(script, /dashboard\.targetFilesProjectionUSD/);
+  assert.doesNotMatch(script, /dashboard\.targetForecastPerFileUSD/);
+  assert.match(script, /plan\.targetFiles = null/);
 });
 
 test('cost UI element IDs are unique', () => {
