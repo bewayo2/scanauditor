@@ -9,6 +9,8 @@ const ComprehensiveAnalyzer = require('./comprehensive_analyzer');
 const { AUDIT_CONFIG } = require('./audit_config');
 const packageJson = require('./package.json');
 const { qualityFindings } = require('./quality_policy');
+const { analyzeInternalCompleteness } = require('./document_completeness');
+const { inspectContentPreservation } = require('./content_preservation');
 
 const CONFIDENCE_LEVELS = new Set(['high', 'medium', 'low']);
 
@@ -554,7 +556,7 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
     findings.push({ code, message, pages: [...new Set(pages)].sort((a, b) => a - b) });
   }
 
-  evaluateQa(textAnalysis, imageAnalysis, metrics) {
+  evaluateQa(textAnalysis, imageAnalysis, metrics, internalCompleteness = null, contentPreservation = null) {
     const findings = [];
     const informationalFindings = [];
     const coverage = textAnalysis.identifierCoverage;
@@ -579,6 +581,31 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
       for (const [code, group] of grouped) this.addFinding(destination, code, group.message, group.pages);
     }
 
+    if (internalCompleteness?.issues?.length) {
+      for (const issue of internalCompleteness.issues) {
+        this.addFinding(findings, issue.code,
+          'A numbered form or visit contains a possible page-sequence gap. Compare with the source; numbering is optional and may restart.',
+          issue.pages);
+      }
+    }
+    for (const observation of internalCompleteness?.observations || []) {
+      this.addFinding(informationalFindings, observation.code,
+        'Printed numbering may reflect a separate visit or form, or intervening unnumbered sheets. This is not proof of a missing paper page.',
+        observation.pages);
+    }
+    if (contentPreservation?.issues?.length) {
+      for (const issue of contentPreservation.issues) {
+        this.addFinding(findings, issue.code,
+          'The scanned page appears nearly blank and is not clearly marked intentionally blank. Verify the source.',
+          issue.pages);
+      }
+    }
+    for (const observation of contentPreservation?.observations || []) {
+      this.addFinding(informationalFindings, observation.code,
+        'Some content is uncertain or potentially clipped. The digital copy alone cannot establish the original paper condition.',
+        observation.pages);
+    }
+
     if (imageAnalysis.exactDuplicateGroups.length) this.addFinding(findings, 'EXACT_DUPLICATE', 'Identical digital page images were found. Verify whether the duplication also exists in the paper source.', imageAnalysis.exactDuplicateGroups.flat());
     if (imageAnalysis.possibleDuplicateGroups.length || imageAnalysis.visionDuplicateGroups.length) {
       this.addFinding(findings, 'POSSIBLE_DUPLICATE', 'Pages appear highly similar and may be duplicates. Verify whether the duplication also exists in the paper source.', [...imageAnalysis.possibleDuplicateGroups.flat(), ...imageAnalysis.visionDuplicateGroups.flat()]);
@@ -592,7 +619,8 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
         : 'One or more automated scan-fidelity findings require manual review.';
 
     const sourceComparisonCodes = new Set([
-      'UNRESOLVED_PAGE', 'MULTIPLE_PATIENT_IDENTIFIERS',
+      'UNRESOLVED_PAGE', 'MULTIPLE_PATIENT_IDENTIFIERS', 'PRINTED_PAGE_SEQUENCE_GAP',
+      'POSSIBLE_TRAILING_PAGES', 'REPEATED_PRINTED_PAGE_NUMBER', 'POSSIBLY_BLANK_PAGE',
       'UNREADABLE_PAGE', 'POSSIBLE_CUTOFF', 'POSSIBLE_INCOMPLETE_PAGE', 'BLURRY_PAGE', 'DARK_PAGE',
       'LIGHT_PAGE', 'ORIENTATION_ISSUE', 'EXACT_DUPLICATE', 'POSSIBLE_DUPLICATE'
     ]);
@@ -617,7 +645,7 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
     }));
   }
 
-  generateReport(fileName, textAnalysis, imageAnalysis, metrics, qaAssessment, totalPages, metadata) {
+  generateReport(fileName, textAnalysis, imageAnalysis, metrics, qaAssessment, totalPages, metadata, internalCompleteness = null, contentPreservation = null) {
     return {
       fileInformation: { fileName, analysisDate: metadata.analysisDate, totalPages },
       summaryTable: this.createSummaryTable(qaAssessment),
@@ -625,6 +653,8 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
       patientIdentifiers: textAnalysis.patientIdentifiers,
       identifierCoverage: textAnalysis.identifierCoverage,
       pageLinkage: textAnalysis.pageLinkage,
+      internalCompleteness,
+      contentPreservation,
       dateIssues: textAnalysis.dateIssues,
       imageAnalysis: {
         complete: imageAnalysis.complete,
@@ -693,16 +723,25 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
       textAnalysis.pageLinkage = await this.classifyContinuationPages(pageContexts, fileName);
       const imageAnalysis = await this.analyzeImagesWithVision(imagePaths, fileName);
       imageAnalysis.possibleDuplicateGroups = this.findPossibleDuplicateGroups(metrics, pageContexts, imageAnalysis.exactDuplicateGroups);
-      const qaAssessment = this.evaluateQa(textAnalysis, imageAnalysis, metrics);
+      const internalCompleteness = analyzeInternalCompleteness(pageContexts, totalPages);
+      const contentPreservation = inspectContentPreservation(pageContexts, imageAnalysis, metrics);
+      const qaAssessment = this.evaluateQa(textAnalysis, imageAnalysis, metrics, internalCompleteness, contentPreservation);
       const metadata = {
         analysisDate,
         dpi: this.auditConfig.dpi,
         models: { ocr: this.ocrModel, text: this.textModel, image: this.imageModel },
         fileSha256,
         durationMs: Date.now() - startedAt,
-        appVersion: packageJson.version
+        appVersion: packageJson.version,
+        auditSettings: {
+          dpi: this.auditConfig.dpi,
+          nearDuplicateHammingDistance: this.auditConfig.nearDuplicateHammingDistance,
+          nearDuplicateTextSimilarity: this.auditConfig.nearDuplicateTextSimilarity,
+          minimumDuplicateTextCharacters: this.auditConfig.minimumDuplicateTextCharacters
+        }
       };
-      const report = this.generateReport(fileName, textAnalysis, imageAnalysis, metrics, qaAssessment, totalPages, metadata);
+      const report = this.generateReport(fileName, textAnalysis, imageAnalysis, metrics,
+        qaAssessment, totalPages, metadata, internalCompleteness, contentPreservation);
 
       this.log('analysis_completed', { totalPages, pagesFailed: textAnalysis.failedPages.length, qaStatus: qaAssessment.status });
       return { filename: fileName, analysis: report, timestamp: analysisDate };

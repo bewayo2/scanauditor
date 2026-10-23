@@ -14,10 +14,14 @@ const { ACTIVE_MODELS, isModelInstalled } = require('./model_config');
 const { AUDIT_CONFIG } = require('./audit_config');
 const { appendAuditRecord } = require('./audit_logger');
 const reviewDispositions = require('./review_dispositions');
+const { evidenceReport } = require('./evidence_report');
+const { runBulkAudit } = require('./bulk_audit');
 
 let mainWindow;
 // In-memory only. Never save or log the hospital's API key.
 let sessionOpenAIKey = null;
+let selectedBulkRoot = null;
+let activeBulk = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -248,6 +252,7 @@ ipcMain.handle('save-cost-plan', async (_event, plan) => {
 });
 
 ipcMain.handle('analyze-files', async (_event, request) => {
+  if (activeBulk) throw new Error('A folder-wide audit is active. Stop it before running individual files.');
   const filePaths = Array.isArray(request) ? request : request?.filePaths;
   const mode = Array.isArray(request) ? 'local' : request?.mode || 'local';
   if (!Array.isArray(filePaths) || filePaths.length === 0) throw new Error('No files selected.');
@@ -295,6 +300,70 @@ ipcMain.handle('analyze-files', async (_event, request) => {
     console.error('[ScanAuditor] cost_run_record_failed');
   }
   return { results, runId };
+});
+
+ipcMain.handle('select-bulk-folder', async () => {
+  if (activeBulk) throw new Error('Stop the active batch before choosing another folder.');
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose folder containing PDF records',
+    properties: ['openDirectory']
+  });
+  if (result.canceled || !result.filePaths.length) return { selected: false };
+  selectedBulkRoot = result.filePaths[0];
+  return { selected: true, description: 'Folder selected. The path is not written into the checkpoint.' };
+});
+ipcMain.handle('stop-bulk-audit', () => {
+  if (activeBulk) activeBulk.requested = true;
+  return { stopping: Boolean(activeBulk) };
+});
+ipcMain.handle('run-bulk-audit', async (_event, request) => {
+  if (activeBulk) throw new Error('A folder-wide audit is already running.');
+  if (!selectedBulkRoot) throw new Error('Choose a folder of PDFs first.');
+  const mode = request?.mode || 'local';
+  if (!['local', 'tiered', 'astra'].includes(mode)) throw new Error('Unsupported mode.');
+  if (mode !== 'local' && (!sessionOpenAIKey || request?.hospitalApproved !== true)) {
+    throw new Error('Hospital approval and a hospital project key are required for cloud processing.');
+  }
+  const cancellation = { requested: false };
+  activeBulk = cancellation;
+  try {
+    return await runBulkAudit({
+      root: selectedBulkRoot,
+      userData: app.getPath('userData'),
+      mode, apiKey: sessionOpenAIKey,
+      hospitalApproved: request?.hospitalApproved === true,
+      retryFailed: request?.retryFailed === true,
+      maxFiles: Number.isSafeInteger(request?.maxFiles) && request.maxFiles > 0 && request.maxFiles <= 1000000
+        ? request.maxFiles : 100,
+      maxUsd: Number.isFinite(request?.maxUsd) && request.maxUsd >= 0.01 && request.maxUsd <= 100000
+        ? request.maxUsd : 5,
+      cancellation,
+      onProgress: progress => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('bulk-progress', progress);
+        }
+      }
+    });
+  } finally {
+    activeBulk = null;
+  }
+});
+ipcMain.handle('export-qa-evidence', async (_event, results) => {
+  if (!Array.isArray(results) || results.length === 0 || results.length > 25) {
+    throw new Error('First analyze up to 25 selected PDF files.');
+  }
+  const selection = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save PHI-minimized scan-fidelity evidence',
+    defaultPath: 'ScanAuditor_Evidence.json',
+    filters: [{ name: 'JSON evidence', extensions: ['json'] }]
+  });
+  if (selection.canceled || !selection.filePath) return { success: false, canceled: true };
+  await fs.writeJson(selection.filePath, {
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    reports: results.map(evidenceReport)
+  }, { spaces: 2 });
+  return { success: true };
 });
 
 ipcMain.handle('export-to-excel', async (_event, analysisResults) => {

@@ -315,6 +315,56 @@ function createQualityEvidence(analysis) {
   return section;
 }
 
+function createPreservationSummary(analysis) {
+  const completeness = analysis.internalCompleteness;
+  const preservation = analysis.contentPreservation;
+  if (!completeness && !preservation) return null;
+  const box = el('div', 'finding-section');
+  box.appendChild(el('h4', '', 'Document Completeness & Content Preservation'));
+  box.appendChild(el('p', 'small-note',
+    'Internal checks assess only the PDF. They cannot establish that all sheets, signatures, or annotations on the paper original were digitized.'));
+  if (completeness) {
+    const count = completeness.numberedPages ?? 0;
+    const unnumbered = (completeness.unnumberedPages || []).length;
+    const groups = completeness.sequenceGroups || [];
+    box.appendChild(el('div', 'finding-item',
+      'Numbered pages: ' + count + ' of ' + completeness.pdfPages +
+      '; unnumbered pages: ' + unnumbered +
+      '; identified numbered sections: ' + groups.length +
+      '. Internal status: ' + completeness.status +
+      '. Numbering can restart for each form or visit and is not required on continuation sheets.'));
+    for (const group of groups) {
+      box.appendChild(el('div', 'finding-item',
+        'Numbered section on PDF pages ' + group.firstPdfPage + '–' + group.lastPdfPage +
+        ': printed ' + group.sequenceFirst + ' through ' + group.sequenceLast +
+        ' of ' + group.declaredTotal +
+        (group.internallyComplete ? ' (internally consistent)' : ' (not fully verifiable)')));
+    }
+    for (const issue of completeness.issues || []) {
+      box.appendChild(el('div', 'finding-item',
+        issue.code.replaceAll('_', ' ') + ' — PDF page(s) ' + issue.pages.join(', ') +
+        (issue.missingSequencePages?.length ? ', printed number(s) possibly missing: ' + issue.missingSequencePages.join(', ') : '')));
+    }
+  }
+  if (preservation) {
+    const assessed = (preservation.pages || []).filter(page => page.assessed).length;
+    box.appendChild(el('div', 'finding-item',
+      'Content-feature observations available: ' + assessed + '/' + (preservation.pages || []).length +
+      ' pages; original paper not independently verified.'));
+    for (const page of preservation.pages || []) {
+      if (!page.assessed && !page.potentiallyBlank) continue;
+      const features = Object.entries(page.features || {})
+        .filter(([, value]) => value !== 'not-observed')
+        .map(([type, value]) => type + ': ' + value).join('; ');
+      box.appendChild(el('div', 'finding-item',
+        'Page ' + page.pageNumber + ': ' + (features || 'no content feature reported') +
+        '; edges ' + page.documentEdges +
+        (page.potentiallyBlank ? '; potentially blank page' : '')));
+    }
+  }
+  return box;
+}
+
 function createReviewFeedback(analysis) {
   const hash = analysis.analysisMetadata?.fileSha256;
   const section = el('div', 'review-feedback');
@@ -402,6 +452,8 @@ function createResultCard(result) {
   const details = el('div', 'result-details');
   details.append(
     createDetail('Total Pages', analysis.fileInformation?.totalPages ?? 0),
+    createDetail('Internal PDF Pagination', analysis.internalCompleteness?.status || 'Not assessed'),
+    createDetail('Content Preservation', analysis.contentPreservation?.status || 'Not assessed'),
     createDetail('Identifier Coverage', Number.isFinite(coverage.coveragePercentage) ? `${coverage.coveragePercentage.toFixed(1)}%` : '0.0%'),
     createDetail('Continuation Pages', Array.isArray(linkage.continuationPages) ? linkage.continuationPages.length : 0),
     createDetail('Document Start Pages', Array.isArray(linkage.documentStartPages) ? linkage.documentStartPages.length : 0),
@@ -414,6 +466,9 @@ function createResultCard(result) {
   const reason = el('div', 'finding-section');
   reason.append(el('h5', '', 'Automated QA Assessment'), el('div', 'finding-item', qa.reason || 'No assessment reason available.'));
   card.appendChild(reason);
+
+  const preservationSummary = createPreservationSummary(analysis);
+  if (preservationSummary) card.appendChild(preservationSummary);
 
   const identifiers = el('div', 'finding-section');
   identifiers.appendChild(el('h5', '', 'Confirmed Patient Identifiers'));
@@ -440,6 +495,92 @@ function createResultCard(result) {
   if (recommendations) card.appendChild(recommendations);
   card.appendChild(createReviewFeedback(analysis));
   return card;
+}
+
+async function exportQaEvidence() {
+  if (!analysisResults.length) {
+    showNotification('Analyze PDF files first to generate evidence.', 'warning');
+    return;
+  }
+  try {
+    const response = await window.electronAPI.exportQaEvidence(analysisResults);
+    if (response.success) showNotification('PHI-minimized QA evidence saved.', 'success');
+  } catch (_) {
+    showNotification('Could not export QA evidence.', 'error');
+  }
+}
+
+let bulkSelected = false;
+let bulkRunning = false;
+function renderBulkProgress(p) {
+  byId('bulk-processed').textContent = Number(p.processed || 0).toLocaleString('en-US');
+  byId('bulk-skipped').textContent = Number(p.skippedFromCheckpoint || 0).toLocaleString('en-US');
+  byId('bulk-review').textContent = Number(p.reviewRequired || 0).toLocaleString('en-US');
+  byId('bulk-failed').textContent = Number(p.analysisFailed || 0).toLocaleString('en-US');
+  byId('bulk-progress-note').textContent = 'PDFs discovered this session: ' + Number(p.filesSeen || 0).toLocaleString('en-US') +
+    '. Pages processed: ' + Number(p.pagesProcessed || 0).toLocaleString('en-US') +
+    '. Metered API usage this session: ' + dollar(p.meteredSpendUSD || 0, 4) +
+    '. ' + (p.stopped ? 'Stopped after current file or configured limit. Select Start / Resume to continue.' : 'Checkpoint updated after each file.');
+}
+async function selectBulkFolder() {
+  try {
+    const result = await window.electronAPI.selectBulkFolder();
+    if (!result?.selected) return;
+    bulkSelected = true;
+    byId('bulk-folder-label').textContent = 'PDF folder selected; source path is not stored in the batch checkpoint.';
+    byId('bulk-start').disabled = false;
+  } catch (_) {
+    showNotification('Could not select a PDF folder.', 'error');
+  }
+}
+async function startBulkAudit() {
+  if (!bulkSelected || bulkRunning) return;
+  const mode = analysisMode.value;
+  if (mode !== 'local' && !hospitalApproved.checked) {
+    showNotification('Confirm hospital authorization before cloud batch processing.', 'warning');
+    return;
+  }
+  bulkRunning = true;
+  byId('bulk-start').disabled = true;
+  byId('bulk-folder').disabled = true;
+  byId('bulk-stop').disabled = false;
+  analyzeFilesBtn.disabled = true;
+  analysisMode.disabled = true;
+  byId('bulk-progress-note').textContent = 'Scanning the selected folder. Work is checkpointed after each PDF.';
+  try {
+    const maxFiles = Number(byId('bulk-max-files').value);
+    const maxUsd = Number(byId('bulk-max-usd').value);
+    if (!Number.isSafeInteger(maxFiles) || maxFiles < 1 || maxFiles > 1000000) {
+      showNotification('Enter a valid per-session file limit.', 'warning');
+      return;
+    }
+    if (mode !== 'local' && (!Number.isFinite(maxUsd) || maxUsd < 0.01 || maxUsd > 100000)) {
+      showNotification('Enter a positive cloud API spending limit.', 'warning');
+      return;
+    }
+    const result = await window.electronAPI.runBulkAudit({
+      mode, hospitalApproved: hospitalApproved.checked,
+      retryFailed: byId('bulk-retry-failed').checked,
+      maxFiles, maxUsd
+    });
+    renderBulkProgress(result);
+    showNotification(result.stopped ? 'Folder audit paused. You can resume it.' : 'Folder audit completed.', 'success');
+  } catch (_) {
+    showNotification('Folder audit stopped with an error. You can resume after resolving the issue.', 'error');
+  } finally {
+    bulkRunning = false;
+    byId('bulk-start').disabled = false;
+    byId('bulk-folder').disabled = false;
+    byId('bulk-stop').disabled = true;
+    analyzeFilesBtn.disabled = false;
+    analysisMode.disabled = false;
+    refreshCostDashboard().catch(() => {});
+  }
+}
+async function stopBulkAudit() {
+  byId('bulk-stop').disabled = true;
+  await window.electronAPI.stopBulkAudit();
+  byId('bulk-progress-note').textContent = 'Stop requested; current PDF will finish before the checkpoint is saved.';
 }
 
 async function exportToExcel() {
@@ -579,6 +720,11 @@ clearFilesBtn.addEventListener('click', () => {
 });
 analyzeFilesBtn.addEventListener('click', analyzeSelectedFiles);
 exportButton.addEventListener('click', exportToExcel);
+byId('export-qa-evidence').addEventListener('click', exportQaEvidence);
+byId('bulk-folder').addEventListener('click', selectBulkFolder);
+byId('bulk-start').addEventListener('click', startBulkAudit);
+byId('bulk-stop').addEventListener('click', stopBulkAudit);
+window.electronAPI.onBulkProgress(renderBulkProgress);
 fileUploadArea.addEventListener('dragover', event => {
   event.preventDefault();
   fileUploadArea.classList.add('dragover');

@@ -38,6 +38,16 @@ const QUALITY_OBSERVATION = {
   },
   required: ['type', 'confidence', 'region', 'reason', 'materialLoss']
 };
+const CONTENT_FEATURE_STATES = ['legible', 'uncertain', 'potentially-clipped', 'not-observed'];
+const CONTENT_FEATURE_NAMES = ['printedText', 'handwriting', 'signatures', 'stamps', 'marginalNotes'];
+const CONTENT_FEATURES_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    ...Object.fromEntries(CONTENT_FEATURE_NAMES.map(name => [name, { type: 'string', enum: CONTENT_FEATURE_STATES }])),
+    documentEdges: { type: 'string', enum: ['visible', 'possible-clipping', 'unknown'] }
+  },
+  required: [...CONTENT_FEATURE_NAMES, 'documentEdges']
+};
 const PAGE_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: {
@@ -47,13 +57,14 @@ const PAGE_SCHEMA = {
     dates: { type: 'array', items: DATE },
     warnings: { type: 'array', items: { type: 'string' } },
     qualityObservations: { type: 'array', items: QUALITY_OBSERVATION },
+    contentFeatures: CONTENT_FEATURES_SCHEMA,
     quality: {
       type: 'object', additionalProperties: false,
       properties: Object.fromEntries(QUALITY_FIELDS.map(field => [field, { type: 'boolean' }])),
       required: QUALITY_FIELDS
     }
   },
-  required: ['ocrText', 'patientNames', 'hospitalNumbers', 'dates', 'warnings', 'qualityObservations', 'quality']
+  required: ['ocrText', 'patientNames', 'hospitalNumbers', 'dates', 'warnings', 'qualityObservations', 'contentFeatures', 'quality']
 };
 
 const PAGE_PROMPT = [
@@ -68,6 +79,9 @@ const PAGE_PROMPT = [
   'For each true quality flag include a qualityObservations item (type, confidence, region, reason, materialLoss). Use only the allowed categories; do not include names, numbers, or OCR passages in qualityObservations.',
   'Set materialLoss true ONLY when visible evidence strongly suggests printed information was clipped, is missing, or is materially illegible, or the page orientation prevents reading it. Otherwise false. Do not infer missing pages or source-paper damage from a blank field.',
   'Flag low contrast, blur or rotation conservatively. A slight tilt or faint original writing is not a material digitization defect.',
+  'In contentFeatures describe whether PRINTED text, handwriting, signatures, stamps, and marginal notes are visible and legible. Use not-observed when not visible; never assume the original contained a feature.',
+  'Use potentially-clipped only if content meets the digital image boundary; do not infer a missing handwritten entry from an empty field. Use documentEdges possible-clipping only when an edge visibly cuts through content.',
+  'Do not infer authenticity, original-paper completeness or permission to destroy paper from one scanned image.',
   'Do not decide overall QA status. Use empty arrays if no relevant fields. Return JSON matching the schema.'
 ].join('\n');
 

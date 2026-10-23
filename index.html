@@ -95,6 +95,31 @@
         </div>
       </section>
 
+      <section class="file-section" aria-labelledby="bulk-heading">
+        <div class="section-header">
+          <h2 id="bulk-heading">Resumable Folder Audit</h2>
+          <p>Process a folder tree one PDF at a time. Results and checkpoints are kept locally without storing patient names, OCR text, or source filenames. Re-select the same folder and mode to resume.</p>
+        </div>
+        <div class="file-actions">
+          <button id="bulk-folder" class="btn btn-secondary" type="button">Select PDF Folder</button>
+          <button id="bulk-start" class="btn btn-success" type="button" disabled>Start / Resume Folder Audit</button>
+          <button id="bulk-stop" class="btn btn-secondary" type="button" disabled>Stop After Current File</button>
+        </div>
+        <p id="bulk-folder-label" class="small-note">No folder selected.</p>
+        <div class="cost-planning">
+          <div><label for="bulk-max-files">Maximum new files this session</label><input id="bulk-max-files" type="number" min="1" max="1000000" step="1" value="100" /></div>
+          <div><label for="bulk-max-usd">Maximum metered API spending (USD; cloud mode)</label><input id="bulk-max-usd" type="number" min="0.01" max="100000" step="0.01" value="5" /></div>
+        </div>
+        <label class="approval-line"><input id="bulk-retry-failed" type="checkbox" /> Retry analysis failures previously recorded in this job</label>
+        <div class="cost-cards">
+          <div class="cost-card"><span>PDFs checked this session</span><strong id="bulk-processed">0</strong></div>
+          <div class="cost-card"><span>Already in checkpoint</span><strong id="bulk-skipped">0</strong></div>
+          <div class="cost-card"><span>Review required</span><strong id="bulk-review">0</strong></div>
+          <div class="cost-card"><span>Analysis failed</span><strong id="bulk-failed">0</strong></div>
+        </div>
+        <p id="bulk-progress-note" class="small-note">Run local mode by default. Cloud mode requires the same explicit hospital approval and session API key as a normal scan. Progress totals count this session; the checkpoint preserves previous results.</p>
+      </section>
+
       <section class="results-section" id="results-section">
         <div class="section-header">
           <h2>Automated QA Results</h2>
@@ -106,6 +131,7 @@
         </div>
         <div class="results-actions">
           <button class="btn btn-primary" id="export-excel-btn" type="button">Export to Excel</button>
+          <button class="btn btn-secondary" id="export-qa-evidence" type="button">Export QA Evidence (JSON)</button>
         </div>
       </section>
 

@@ -147,8 +147,8 @@ class ResilientScanFidelityAnalyzer extends ScanFidelityAnalyzer {
     return combined;
   }
 
-  evaluateQa(textAnalysis, imageAnalysis, metrics) {
-    const qa = super.evaluateQa(textAnalysis, imageAnalysis, metrics);
+  evaluateQa(textAnalysis, imageAnalysis, metrics, internalCompleteness = null, contentPreservation = null) {
+    const qa = super.evaluateQa(textAnalysis, imageAnalysis, metrics, internalCompleteness, contentPreservation);
     const failures = Array.isArray(textAnalysis.processingFailures) ? textAnalysis.processingFailures : [];
     if (!failures.length) return qa;
 
