@@ -640,6 +640,11 @@ async function refreshCostDashboard() {
   const mode = analysisMode.value;
   const dashboard = await window.electronAPI.getCostDashboard(mode);
   const run = dashboard.run;
+  byId('cost-run-summary').textContent = !run
+    ? 'No scans recorded yet'
+    : Number(run.fileCount).toLocaleString('en-US') + ' PDF file(s) · ' +
+      Number(run.totalPages).toLocaleString('en-US') + ' pages · ' +
+      dollar(run.recordedSpendUSD, 6) + ' (' + run.mode + ')';
   byId('cost-spent').textContent = dollar(dashboard.recordedSpendUSD,
     dashboard.recordedSpendUSD < 0.01 ? 6 : 2);
   byId('cost-run-pages').textContent = run ? Number(run.totalPages).toLocaleString('en-US') : '—';
@@ -672,6 +677,7 @@ async function refreshCostDashboard() {
   }
   selector.value = dashboard.plan.selectedRunId || '';
   if (selector.selectedIndex === -1) selector.value = '';
+  syncCostRunSelector();
   const forecastSources = {
     'latest-run': 'latest recorded run in this model mode',
     'selected-run': 'only the chosen run; older runs excluded',
@@ -700,25 +706,49 @@ async function refreshCostDashboard() {
         dashboard.forecastFileSample.meteredPages + '/' +
         dashboard.forecastFileSample.totalPages + ' pages metered in the reference run'
       : 'no compatible reference run';
-  byId('cost-target-files-projection').textContent = dashboard.targetFiles === null
-    ? 'Future-file forecast: none entered. Enter a number of files to project.'
-    : dashboard.targetFilesProjectionUSD === null
-      ? 'For ' + Number(dashboard.targetFiles).toLocaleString('en-US') +
-        ' files: cost unavailable. A recorded, matching run with usable file and page counts is needed; ' +
-        'a page-only token estimate cannot establish pages per file.'
-      : 'Optional ' + Number(dashboard.targetFiles).toLocaleString('en-US') +
-        '-file forecast (' + mode + '): ' + dollar(dashboard.targetFilesProjectionUSD) +
-        ' at ' + dollar(dashboard.targetForecastPerFileUSD, 8) + '/file based on ' +
-        fileSource + '. ' +
-        (dashboard.forecastFileSample?.estimatedUnmeteredPages
-          ? 'Unmetered pages were estimated; verify results before budgeting. ' : '') +
-        'This is not cumulative recorded spending.';
+  const amount = byId('cost-file-estimate');
+  if (dashboard.targetFiles === null) {
+    amount.textContent = '—';
+    byId('cost-target-files-projection').textContent =
+      'Enter the number of PDF files you want to budget for, then click Estimate Cost.';
+  } else if (dashboard.targetFilesProjectionUSD === null) {
+    amount.textContent = 'Estimate unavailable';
+    byId('cost-target-files-projection').textContent =
+      'No usable ' + mode + ' scan sample for this method. Analyze a few representative files or choose another run in Advanced Options. No charge was made.';
+  } else {
+    amount.textContent = dollar(dashboard.targetFilesProjectionUSD);
+    const basis = dashboard.targetForecastSource;
+    const basisText = basis === 'selected-run' ? 'the selected scan run'
+      : basis === 'latest-run' ? 'the latest matching scan run'
+        : basis === 'historical' || basis === 'historical-fallback'
+          ? 'the historical average across matching runs'
+          : 'local processing (no OpenAI API charges)';
+    const sampleText = dashboard.forecastFileSample
+      ? ' Reference: ' + Number(dashboard.forecastFileSample.fileCount).toLocaleString('en-US') +
+        ' file(s), ' + Number(dashboard.forecastFileSample.totalPages).toLocaleString('en-US') +
+        ' pages.'
+      : basis === 'historical' || basis === 'historical-fallback'
+        ? ' Historical sample: ' + Number(dashboard.historicalFileCount || 0).toLocaleString('en-US') +
+          ' metered file(s).' : '';
+    byId('cost-target-files-projection').textContent =
+      Number(dashboard.targetFiles).toLocaleString('en-US') + ' files × ' +
+      dollar(dashboard.targetForecastPerFileUSD, 6) + ' per file, based on ' +
+      basisText + '.' + sampleText +
+      (dashboard.forecastFileSample?.estimatedUnmeteredPages
+        ? ' Some pages lacked usage and were estimated.' : '') +
+      ' This is a forecast, not an API charge.';
+  }
   return dashboard;
+}
+function syncCostRunSelector() {
+  const basis = byId('forecast-basis').value;
+  byId('cost-run-selector').hidden = basis !== 'selected-run';
 }
 function setPlanInputs(plan) {
   for (const [key, input] of Object.entries(costFields)) {
     input.value = plan[key] === null ? '' : plan[key];
   }
+  syncCostRunSelector();
 }
 async function configureApiKey() {
   const key = apiKeyField.value;
@@ -737,6 +767,13 @@ async function clearApiKey() {
   apiKeyStatus.textContent = 'No API key configured. The key is not saved to disk.';
 }
 async function saveCostSettings() {
+  const fileInput = byId('forecast-target-files');
+  const pageInput = byId('forecast-target-pages');
+  if (!fileInput.value && !pageInput.value) {
+    showNotification('Enter the number of files to estimate, or a page target in Advanced Options.', 'warning');
+    fileInput.focus();
+    return;
+  }
   const plan = {};
   for (const [key, input] of Object.entries(costFields)) {
     plan[key] = key === 'forecastBasis' || key === 'selectedRunId' ? input.value
@@ -746,7 +783,7 @@ async function saveCostSettings() {
     await window.electronAPI.saveCostPlan(plan);
     const dashboard = await refreshCostDashboard();
     setPlanInputs(dashboard.plan);
-    showNotification('Cost assumptions saved on this computer.', 'success');
+    showNotification('Estimate updated. Forecast settings saved on this computer.', 'success');
   } catch (_) {
     showNotification('Could not save cost settings.', 'error');
   }
@@ -766,6 +803,10 @@ analysisMode.addEventListener('change', showCloudControls);
 byId('save-openai-key').addEventListener('click', configureApiKey);
 byId('clear-openai-key').addEventListener('click', clearApiKey);
 byId('save-cost-plan').addEventListener('click', saveCostSettings);
+byId('forecast-basis').addEventListener('change', syncCostRunSelector);
+byId('forecast-target-files').addEventListener('keydown', event => {
+  if (event.key === 'Enter') saveCostSettings();
+});
 byId('reset-cost-history').addEventListener('click', resetCostHistory);
 selectFilesBtn.addEventListener('click', handleFileSelection);
 clearFilesBtn.addEventListener('click', () => {
