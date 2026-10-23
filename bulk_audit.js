@@ -111,7 +111,7 @@ async function inspectBulkFolder({
   const exact = filesTotal === 0 || sampledFiles === filesTotal && sampleFailed === 0;
   const result = {
     phase: 'ready', filesTotal, estimatedPages,
-    estimateKind: !sampledFiles ? 'unavailable' : exact ? 'exact-metadata' : 'sampled',
+    estimateKind: exact ? 'exact-metadata' : !sampledFiles ? 'unavailable' : 'sampled',
     sampledFiles, sampleFailed, sampleTarget: reservoir.length,
     averagePagesPerFile: sampledFiles ? sampledPages / sampledFiles : null,
     // Inventory counts files, not actual analysis successes.
