@@ -106,8 +106,9 @@ async function inspectBulkFolder({
       tick = Date.now();
     }
   }
-  const estimatedPages = sampledFiles ? Math.round(filesTotal * sampledPages / sampledFiles) : null;
-  const exact = sampledFiles === filesTotal && sampleFailed === 0;
+  const estimatedPages = filesTotal === 0 ? 0 :
+    sampledFiles ? Math.round(filesTotal * sampledPages / sampledFiles) : null;
+  const exact = filesTotal === 0 || sampledFiles === filesTotal && sampleFailed === 0;
   const result = {
     phase: 'ready', filesTotal, estimatedPages,
     estimateKind: !sampledFiles ? 'unavailable' : exact ? 'exact-metadata' : 'sampled',
