@@ -697,15 +697,6 @@ async function refreshCostDashboard() {
         '-page forecast (' + mode + '): ' + dollar(dashboard.targetProjectionUSD) +
         ' at ' + dollar(dashboard.targetForecastPerPageUSD, 8) + '/page using ' +
         sourceText + '.';
-  const fileSource = dashboard.targetForecastSource === 'historical' ||
-    dashboard.targetForecastSource === 'historical-fallback'
-    ? Number(dashboard.historicalFileCount || 0).toLocaleString('en-US') +
-      ' fully metered files across comparable runs'
-    : dashboard.forecastFileSample
-      ? dashboard.forecastFileSample.fileCount + ' file(s), ' +
-        dashboard.forecastFileSample.meteredPages + '/' +
-        dashboard.forecastFileSample.totalPages + ' pages metered in the reference run'
-      : 'no compatible reference run';
   const amount = byId('cost-file-estimate');
   if (dashboard.targetFiles === null) {
     amount.textContent = '—';
@@ -769,6 +760,18 @@ async function clearApiKey() {
 async function saveCostSettings() {
   const fileInput = byId('forecast-target-files');
   const pageInput = byId('forecast-target-pages');
+  if (fileInput.value && (!Number.isSafeInteger(Number(fileInput.value)) ||
+      Number(fileInput.value) < 1 || Number(fileInput.value) > 100000000)) {
+    showNotification('Enter a whole number of files between 1 and 100,000,000.', 'warning');
+    fileInput.focus();
+    return;
+  }
+  if (pageInput.value && (!Number.isSafeInteger(Number(pageInput.value)) ||
+      Number(pageInput.value) < 1 || Number(pageInput.value) > 100000000)) {
+    showNotification('Enter a valid number of pages in Advanced Options.', 'warning');
+    pageInput.focus();
+    return;
+  }
   if (!fileInput.value && !pageInput.value) {
     showNotification('Enter the number of files to estimate, or a page target in Advanced Options.', 'warning');
     fileInput.focus();
