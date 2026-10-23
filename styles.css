@@ -886,6 +886,56 @@ body {
 }
 .cost-planning button { min-height: 42px; }
 
+/* File-first cost estimate: one number in, one headline cost out. */
+.cost-simple { max-width: 760px; margin-top: 18px; }
+.cost-simple > label {
+    display: block; font-weight: 700; font-size: 16px; margin-bottom: 9px; color: #344256;
+}
+.cost-simple-input { display: flex; align-items: stretch; gap: 12px; flex-wrap: wrap; }
+.cost-simple-input input {
+    flex: 1 1 220px; max-width: 340px; min-width: 0;
+    min-height: 48px; padding: 10px 13px; border: 1px solid #bdc9d9;
+    border-radius: 9px; background: white; color: #263547; font: inherit; font-size: 17px;
+}
+.cost-simple-input button { min-height: 48px; min-width: 156px; }
+.cost-estimate-result {
+    margin-top: 16px; padding: 20px; border: 1px solid #dce3ed;
+    border-radius: 12px; background: #f6f8fb;
+}
+.cost-estimate-result > span { display: block; font-size: 13px; font-weight: 600; color: #56657c; }
+.cost-estimate-result > strong {
+    display: block; margin: 7px 0; font-size: clamp(26px, 3vw, 34px);
+    line-height: 1.15; font-weight: 750; color: #24334a;
+    font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+}
+.cost-estimate-result p { margin: 7px 0 0; }
+.cost-quick-summary {
+    display: flex; flex-wrap: wrap; gap: 12px 32px; margin: 18px 0 8px;
+}
+.cost-quick-summary > div { display: grid; gap: 3px; }
+.cost-quick-summary span { font-size: 12px; color: #66758a; }
+.cost-quick-summary strong { font-size: 14px; font-weight: 650; color: #334155; }
+.cost-advanced { border-top: 1px solid #e2e7ef; margin-top: 22px; padding-top: 16px; }
+.cost-advanced > summary, .cost-reset-area > summary {
+    cursor: pointer; font-size: 14px; font-weight: 650;
+    color: #42526b; padding: 8px 0;
+}
+.cost-advanced > summary:focus-visible, .cost-reset-area > summary:focus-visible,
+.cost-simple-input input:focus-visible {
+    outline: 2px solid #5269b3; outline-offset: 3px;
+}
+.cost-advanced-inner { padding: 4px 0 0; }
+.cost-reset-area {
+    margin-top: 18px; border-top: 1px solid #e2e7ef;
+    padding-top: 12px;
+}
+.cost-reset-area .btn { margin: 12px 0 4px; }
+@media (max-width: 540px) {
+    .cost-simple-input input { max-width: none; flex-basis: 100%; }
+    .cost-simple-input button { width: 100%; }
+    .cost-estimate-result { padding: 16px; }
+}
+
 /* Human scan-quality review feedback (recorded without PHI). */
 .review-feedback {
     margin: 20px 0 4px;

@@ -48,32 +48,63 @@
 
       <section class="cost-section" aria-labelledby="cost-heading">
         <div class="section-header">
-          <h2 id="cost-heading">Scan Cost Tracker</h2>
-          <p>The last run's page count is read directly from the PDFs analyzed. No fixed record count is assumed. All amounts are estimated USD API charges, not a billing invoice.</p>
+          <h2 id="cost-heading">Estimate Scanning Cost</h2>
+          <p>Enter how many PDF files the organization plans to process. The estimate uses the latest matching scan automatically. No files are processed or charged when you calculate.</p>
         </div>
-        <div class="cost-cards">
-          <div class="cost-card"><span>Pages in last run</span><strong id="cost-run-pages">—</strong></div>
-          <div class="cost-card"><span>API spend for last run</span><strong id="cost-run-spent">—</strong></div>
-          <div class="cost-card"><span>Est. cost per page (last run)</span><strong id="cost-page">—</strong></div>
-          <div class="cost-card"><span>Est. total for last run</span><strong id="cost-total">—</strong></div>
-          <div class="cost-card"><span>API spend across all runs</span><strong id="cost-spent">—</strong></div>
+
+        <div class="cost-simple">
+          <label for="forecast-target-files">How many PDF files do you need to process?</label>
+          <div class="cost-simple-input">
+            <input type="number" id="forecast-target-files" min="1" max="100000000" step="1" inputmode="numeric" placeholder="e.g. 1000000" />
+            <button id="save-cost-plan" type="button" class="btn btn-primary">Estimate Cost</button>
+          </div>
+          <div class="cost-estimate-result" role="status" aria-live="polite" aria-atomic="true">
+            <span>Estimated total API cost</span>
+            <strong id="cost-file-estimate">—</strong>
+            <p id="cost-target-files-projection" class="small-note">Enter a number of files to see an estimate based on your scan results.</p>
+          </div>
         </div>
-        <p id="cost-basis" class="small-note">Run a PDF to see the page-based cost breakdown.</p>
-        <div class="cost-planning">
-          <div><label for="forecast-target-files">Optional future target (files)</label><input type="number" id="forecast-target-files" min="1" max="100000000" step="1" placeholder="e.g. 1000000" /></div>
-          <div><label for="forecast-target-pages">Optional future target (pages)</label><input type="number" id="forecast-target-pages" min="1" max="100000000" step="1" placeholder="Leave blank" /></div>
-          <div><label for="forecast-basis">Future forecast uses</label><select id="forecast-basis"><option value="latest-run">Latest matching run (default)</option><option value="selected-run">Only a selected run (ignore history)</option><option value="historical">Historical average across runs</option></select></div>
-          <div><label for="forecast-selected-run">Cost reference run</label><select id="forecast-selected-run"><option value="">Choose a previous run</option></select></div>
-          <div><label for="planning-input-tokens">Estimated input tokens / page</label><input type="number" id="planning-input-tokens" min="1" max="1000000" step="100" value="5000" /></div>
-          <div><label for="planning-output-tokens">Estimated output tokens / page</label><input type="number" id="planning-output-tokens" min="1" max="100000" step="100" value="500" /></div>
-          <div><label for="fallback-percent">Estimated Sol fallback %</label><input type="number" id="fallback-percent" min="0" max="100" step="1" value="10" /></div>
-          <button id="save-cost-plan" type="button" class="btn btn-secondary">Save Forecast Settings</button>
+
+        <div class="cost-quick-summary">
+          <div>
+            <span>Most recent scan</span>
+            <strong id="cost-run-summary">No scans recorded yet</strong>
+          </div>
+          <div>
+            <span>All-time tracked API spending</span>
+            <strong id="cost-spent">—</strong>
+          </div>
         </div>
-        <p id="cost-target-files-projection" class="small-note">Future-file forecast: enter a file count and choose a recorded run or a historical average.</p>
-        <p id="cost-target-projection" class="small-note">Future-page forecast: none entered.</p>
-        <div class="file-actions"><button id="reset-cost-history" type="button" class="btn btn-secondary">Reset All Cost History</button></div>
-        <p class="small-note">Reset permanently deletes this computer's API usage ledger, run-cost history, and forecast settings after confirmation. It cannot reverse API charges or delete provider invoices, PDF files, QA evidence, or batch checkpoints.</p>
-        <p class="small-note">If a scan fails or some pages return no API token usage, the remaining pages are estimated separately. Future-page projections never replace the actual page total of the last run.</p>
+        <p class="small-note">Estimated API charges only, not an invoice. A small or unusual scan sample can produce an unreliable project-wide estimate.</p>
+
+        <details class="cost-advanced" id="cost-advanced">
+          <summary>Advanced Options &amp; Cost History</summary>
+          <div class="cost-advanced-inner">
+            <p class="small-note">Optional: compare a specific run, use a historical average, estimate by pages, or change token assumptions. Click <strong>Estimate Cost</strong> above to apply changes.</p>
+            <div class="cost-planning">
+              <div><label for="forecast-basis">Calculate using</label><select id="forecast-basis"><option value="latest-run">Latest matching run (default)</option><option value="selected-run">One selected run only</option><option value="historical">Historical average</option></select></div>
+              <div id="cost-run-selector"><label for="forecast-selected-run">Choose a run</label><select id="forecast-selected-run"><option value="">Choose a previous run</option></select></div>
+              <div><label for="forecast-target-pages">Optional future target (pages)</label><input type="number" id="forecast-target-pages" min="1" max="100000000" step="1" placeholder="Leave blank" /></div>
+              <div><label for="planning-input-tokens">Assumed input tokens / page</label><input type="number" id="planning-input-tokens" min="1" max="1000000" step="100" value="5000" /></div>
+              <div><label for="planning-output-tokens">Assumed output tokens / page</label><input type="number" id="planning-output-tokens" min="1" max="100000" step="100" value="500" /></div>
+              <div><label for="fallback-percent">Assumed Sol fallback %</label><input type="number" id="fallback-percent" min="0" max="100" step="1" value="10" /></div>
+            </div>
+            <div class="cost-cards">
+              <div class="cost-card"><span>Pages in last run</span><strong id="cost-run-pages">—</strong></div>
+              <div class="cost-card"><span>API spend for last run</span><strong id="cost-run-spent">—</strong></div>
+              <div class="cost-card"><span>Est. cost / page in last run</span><strong id="cost-page">—</strong></div>
+              <div class="cost-card"><span>Estimated total for last run</span><strong id="cost-total">—</strong></div>
+            </div>
+            <p id="cost-basis" class="small-note">Run a PDF to see a breakdown of its API costs.</p>
+            <p id="cost-target-projection" class="small-note">Future-page forecast: none entered.</p>
+            <p class="small-note">If pages had no reported API token usage, missing costs may be estimated separately. The historical file-rate estimate uses completed metered runs only.</p>
+            <details class="cost-reset-area">
+              <summary>Reset cost history</summary>
+              <p class="small-note">This permanently deletes this computer's recorded API usage, run history and saved forecast settings after confirmation. Actual provider charges, PDFs, QA evidence and batch checkpoints are not affected.</p>
+              <button id="reset-cost-history" type="button" class="btn btn-secondary">Reset All Cost History</button>
+            </details>
+          </div>
+        </details>
       </section>
 
       <section class="file-section">
