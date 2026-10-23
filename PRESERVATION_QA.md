@@ -28,7 +28,13 @@ The evidence digest is deterministic for an existing analysis result, but is **n
 
 ## Resumable folder audits
 
-Use **Select PDF Folder** and **Start / Resume Folder Audit** in the desktop UI. It traverses subfolders, skips symbolic links, processes PDFs one at a time, and records an append-only per-file checkpoint. **Stop After Current File** halts safely. Re-select the same folder and mode to resume; completed files are skipped. Select **Retry analysis failures** to reattempt files previously recorded as failed. A modified file gets a new checkpoint key.
+Use **Select PDF Folder** and **Start / Resume Folder Audit** in the desktop UI. The selected folder's **full local path is shown on screen**, but it is never stored in the checkpoint, progress ledger, or cloud request.
+
+After selection, a **read-only preview** traverses the folder and subfolders (without following symbolic links) to count PDF files. It then reads page-count metadata for up to **60 uniformly sampled PDFs** (or every PDF if there are fewer than 60). The screen displays **Anticipated pages in folder** as an approximate extrapolation from sampled pages per PDF, along with the sample size and unreadable sample count. Only when every file's page metadata was successfully read does it label the total an exact metadata count. If no page counts are readable, the estimate is unavailable—not zero. This may take time for very large folders or slow network storage; the inventory displays live stage and file-count feedback.
+
+During scanning, the UI shows the current PDF number **without its name**, a progress bar for the **current batch/session file limit**, processed PDFs, pages **actually processed this session**, files skipped from the prior checkpoint, review/failed counts, and this session's metered API cost. The page counters update after each PDF is completed, not inside a single multi-page PDF. Page estimates and actual totals have different labels; no estimates are counted as verified QA pages. Cumulative progress from older sessions is represented by checkpoint-skip counts, not by silently adding those pages to the present session.
+
+The audit still processes PDFs one at a time and records an append-only per-file checkpoint. **Stop After Current File** halts the current operation (during inventory or after the current PDF when auditing). Re-select the same folder and mode to resume; completed files are skipped. Select **Retry analysis failures** to reattempt previously failed documents. A modified file gets a new checkpoint key.
 
 The desktop UI starts with a **100-new-file pilot limit** and a **$5 metered API spend limit** for cloud mode. The CLI likewise defaults to 100 new files and $5 for cloud runs; use --max-files N and --max-usd N to increase deliberately. Spending limits are checked **between PDFs**, so a large single PDF can exceed the limit before the stop takes effect. These are safeguards, not billing-provider hard caps.
 

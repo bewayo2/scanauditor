@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs-extra');
 const os = require('node:os');
 const path = require('node:path');
-const { runBulkAudit, walkPdfs, jobDirectory } = require('../bulk_audit');
+const { runBulkAudit, inspectBulkFolder, walkPdfs, jobDirectory } = require('../bulk_audit');
 
 const fakeAnalyzer = () => ({
   analyzeFile: async ({ path: filename }) => ({
@@ -121,4 +121,122 @@ test('cloud spend cap stops after currently charged PDF without starting another
   assert.equal(result.stopped, true);
   assert.equal(paidCalls, 1);
   assert.ok(result.meteredSpendUSD >= 0.001);
+});
+
+
+test('folder preview counts all PDFs but estimates pages from safe metadata sampling', async t => {
+  const { root } = await tempJob(t);
+  const events = [];
+  const info = await inspectBulkFolder({
+    root,
+    readPageCount: async file => path.basename(file).startsWith('two_') ? 2 : 4,
+    sampleLimit: 20,
+    onProgress: event => events.push(event)
+  });
+  assert.equal(info.filesTotal, 2);
+  assert.equal(info.estimatedPages, 6);
+  assert.equal(info.estimateKind, 'exact-metadata');
+  assert.equal(info.sampledFiles, 2);
+  assert.equal(info.sampleFailed, 0);
+  assert.ok(events.some(x => x.phase === 'inventory'));
+  assert.ok(events.some(x => x.phase === 'sampling'));
+  assert.ok(events.some(x => x.phase === 'ready'));
+  const serialized = JSON.stringify(events);
+  assert.ok(!serialized.includes('Patient_Alice'));
+  assert.ok(!serialized.includes('Patient_Bob'));
+  assert.ok(!serialized.includes(root));
+});
+
+test('page preview marks sampled forecasts approximate when not every file is counted', async t => {
+  const { root } = await tempJob(t);
+  const result = await inspectBulkFolder({
+    root, sampleLimit: 1, readPageCount: async () => 3
+  });
+  assert.equal(result.filesTotal, 2);
+  assert.equal(result.sampledFiles, 1);
+  assert.equal(result.estimatedPages, 6);
+  assert.equal(result.estimateKind, 'sampled');
+});
+
+test('unreadable preview PDFs preserve PDF counts but do not invent pages', async t => {
+  const { root } = await tempJob(t);
+  const result = await inspectBulkFolder({
+    root, readPageCount: async () => { throw new Error('synthetic encrypted PDF'); }
+  });
+  assert.equal(result.filesTotal, 2);
+  assert.equal(result.estimatedPages, null);
+  assert.equal(result.sampleFailed, 2);
+  assert.equal(result.estimateKind, 'unavailable');
+});
+
+test('folder inventory is cancellable and does not perform any source-file mutation', async t => {
+  const { root } = await tempJob(t);
+  const cancel = { requested: false };
+  const events = [];
+  const summary = await inspectBulkFolder({
+    root, cancellation: cancel, sampleLimit: 2,
+    onProgress: event => {
+      events.push(event);
+      if (event.phase === 'inventory' && event.filesTotal > 0) cancel.requested = true;
+    },
+    readPageCount: async () => 4
+  });
+  assert.equal(summary.canceled, true);
+  assert.ok(events.some(x => x.phase === 'canceled'));
+  assert.equal(await fs.readFile(path.join(root, 'Patient_Alice.pdf'), 'utf8'), 'synthetic-not-medical');
+});
+
+test('batch emits processing/completed events for every PDF with pages but no source path', async t => {
+  const { root, userData } = await tempJob(t);
+  const events = [];
+  const info = await inspectBulkFolder({
+    root, readPageCount: async () => 3
+  });
+  const result = await runBulkAudit({
+    root, userData, inventory: info, analyzerFactory: fakeAnalyzer,
+    onProgress: progress => events.push(progress)
+  });
+  assert.equal(result.processed, 2);
+  assert.equal(result.pagesProcessed, 6);
+  assert.equal(result.filesTotal, 2);
+  assert.equal(result.estimatedPages, 6);
+  const processing = events.filter(x => x.phase === 'processing');
+  assert.equal(processing.length, 2);
+  assert.deepEqual(processing.map(x => x.currentFileNumber), [1, 2]);
+  assert.ok(events.some(x => x.phase === 'running' && x.pagesProcessed === 4));
+  assert.ok(events.some(x => x.phase === 'completed' && x.pagesProcessed === 6));
+  const serialized = JSON.stringify(events);
+  for (const privateText of ['Patient_Alice', 'Patient_Bob', root, 'synthetic-not-medical']) {
+    assert.equal(serialized.includes(privateText), false);
+  }
+});
+
+test('previously checkpointed PDFs increment skip count and preserve processed-page meaning', async t => {
+  const { root, userData } = await tempJob(t);
+  const info = await inspectBulkFolder({ root, readPageCount: async () => 3 });
+  const first = await runBulkAudit({
+    root, userData, maxFiles: 1, inventory: info, analyzerFactory: fakeAnalyzer
+  });
+  assert.equal(first.processed, 1);
+  const events = [];
+  const resumed = await runBulkAudit({
+    root, userData, inventory: info, analyzerFactory: fakeAnalyzer,
+    onProgress: event => events.push(event)
+  });
+  assert.equal(resumed.processed, 1);
+  assert.equal(resumed.skippedFromCheckpoint, 1);
+  assert.equal(resumed.pagesProcessed, 2);
+  assert.equal(resumed.filesTotal, 2);
+  assert.equal(resumed.phase, 'completed');
+  assert.ok(events.some(x => x.phase === 'completed' && x.skippedFromCheckpoint === 1));
+});
+
+
+test('an empty selected folder shows exactly zero PDFs and zero anticipated pages', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'scanauditor-empty-inventory-'));
+  t.after(async () => fs.remove(dir));
+  const result = await inspectBulkFolder({ root: dir });
+  assert.equal(result.filesTotal, 0);
+  assert.equal(result.estimatedPages, 0);
+  assert.equal(result.estimateKind, 'exact-metadata');
 });

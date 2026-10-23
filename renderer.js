@@ -512,33 +512,169 @@ async function exportQaEvidence() {
 }
 
 let bulkSelected = false;
+let bulkPreviewing = false;
 let bulkRunning = false;
-function renderBulkProgress(p) {
-  byId('bulk-processed').textContent = Number(p.processed || 0).toLocaleString('en-US');
-  byId('bulk-skipped').textContent = Number(p.skippedFromCheckpoint || 0).toLocaleString('en-US');
-  byId('bulk-review').textContent = Number(p.reviewRequired || 0).toLocaleString('en-US');
-  byId('bulk-failed').textContent = Number(p.analysisFailed || 0).toLocaleString('en-US');
-  byId('bulk-progress-note').textContent = 'PDFs discovered this session: ' + Number(p.filesSeen || 0).toLocaleString('en-US') +
-    '. Pages processed: ' + Number(p.pagesProcessed || 0).toLocaleString('en-US') +
-    '. Metered API usage this session: ' + dollar(p.meteredSpendUSD || 0, 4) +
-    '. ' + (p.stopped ? 'Stopped after current file or configured limit. Select Start / Resume to continue.' : 'Checkpoint updated after each file.');
+let bulkInventory = null;
+
+function showBulkEstimate(info) {
+  const files = Number(info.filesTotal);
+  if (Number.isSafeInteger(files) && files >= 0) {
+    byId('bulk-files-total').textContent = files.toLocaleString('en-US');
+  }
+  if (info.estimatedPages === null || !Number.isSafeInteger(info.estimatedPages)) {
+    byId('bulk-pages-expected').textContent = 'Unknown';
+  } else {
+    byId('bulk-pages-expected').textContent =
+      (info.estimateKind === 'exact-metadata' ? '' : '≈ ') +
+      Number(info.estimatedPages).toLocaleString('en-US');
+  }
+  if (info.phase === 'ready' || info.phase === 'running' ||
+      info.phase === 'processing' || info.phase === 'completed' || info.phase === 'stopped') {
+    byId('bulk-estimate-note').textContent = info.estimatedPages === null
+      ? 'Page-count estimate unavailable: PDF metadata in the sample could not be read. File scanning can still proceed.'
+      : info.estimateKind === 'exact-metadata'
+        ? 'Page total obtained from readable PDF metadata for all ' +
+          Number(info.sampledFiles).toLocaleString('en-US') + ' file(s). This is not a guarantee of successful scan QA.'
+        : 'Anticipated folder pages are approximate, based on ' +
+          Number(info.sampledFiles || 0).toLocaleString('en-US') +
+          ' sampled PDF(s)' + (info.sampleFailed ? ', ' + info.sampleFailed + ' unreadable sample(s)' : '') +
+          '. Individual PDFs may differ greatly; actual page counts update as files finish.';
+  }
 }
+
+function renderBulkProgress(progress) {
+  if (!progress || typeof progress !== 'object') return;
+  const phase = progress.phase || 'running';
+  const meter = byId('bulk-progress-bar');
+  const text = byId('bulk-progress-percentage');
+  const current = byId('bulk-current');
+  const note = byId('bulk-progress-note');
+  showBulkEstimate(progress);
+  const fmt = value => Number(value || 0).toLocaleString('en-US');
+
+  if (phase === 'inventory') {
+    byId('bulk-phase').textContent = 'Counting PDF files…';
+    meter.removeAttribute('value');
+    text.textContent = fmt(progress.filesTotal) + ' PDFs found so far';
+    current.textContent = 'Searching selected folder and subfolders. No images are being analyzed.';
+    return;
+  }
+  if (phase === 'sampling') {
+    byId('bulk-phase').textContent = 'Estimating page count…';
+    meter.removeAttribute('value');
+    text.textContent = fmt((progress.sampledFiles || 0) + (progress.sampleFailed || 0)) +
+      ' / ' + fmt(progress.sampleTarget) + ' sampled PDFs checked';
+    current.textContent = 'Reading a small random sample of PDF page counts. This does not send files to AI.';
+    return;
+  }
+  if (phase === 'canceled') {
+    byId('bulk-phase').textContent = 'Inventory canceled';
+    meter.value = 0;
+    text.textContent = 'Stopped';
+    current.textContent = 'Select the folder again to retry the inventory.';
+    return;
+  }
+  if (phase === 'ready') {
+    byId('bulk-phase').textContent = 'Folder inventoried — ready to scan';
+    meter.value = 0;
+    text.textContent = '0% of this batch';
+    current.textContent = 'Found ' + fmt(progress.filesTotal) +
+      ' PDFs. Review the anticipated page total and click Start / Resume Folder Audit.';
+    return;
+  }
+
+  const processed = Number(progress.processed || 0);
+  const target = Number(progress.sessionTarget || 0);
+  const isComplete = phase === 'completed';
+  const fraction = isComplete ? 100 : target > 0 ? Math.min(100, Math.round(100 * processed / target)) : 0;
+  meter.value = fraction;
+  text.textContent = fraction + '% of batch · ' + fmt(processed) +
+    ' / ' + fmt(target) + ' new PDF(s)';
+  byId('bulk-processed').textContent = fmt(processed);
+  byId('bulk-skipped').textContent = fmt(progress.skippedFromCheckpoint);
+  byId('bulk-review').textContent = fmt(progress.reviewRequired);
+  byId('bulk-failed').textContent = fmt(progress.analysisFailed);
+  byId('bulk-pages-done').textContent = fmt(progress.pagesProcessed);
+
+  const descriptions = {
+    running: 'Scanning PDFs',
+    processing: 'Analyzing current PDF…',
+    stopped: 'Stopped safely — resume available',
+    completed: 'Folder audit completed'
+  };
+  byId('bulk-phase').textContent = descriptions[phase] || 'Scanning PDFs';
+  current.textContent = phase === 'processing'
+    ? 'Processing PDF ' + fmt(progress.currentFileNumber) + ' of ' +
+      fmt(progress.filesTotal) + ' in this folder; page count updates when this PDF finishes.'
+    : phase === 'stopped'
+      ? 'Stopped after the current PDF or session limit. Re-select Start / Resume to continue.'
+      : phase === 'completed'
+        ? 'Reached the end of the folder. Files in checkpoints were not reprocessed.'
+        : 'Checked ' + fmt(progress.filesSeen) + ' / ' +
+          fmt(progress.filesTotal) + ' folder PDFs, including previously checkpointed files.';
+  note.textContent = 'Actual pages processed this session: ' + fmt(progress.pagesProcessed) +
+    ' · API usage in this session: ' + dollar(progress.meteredSpendUSD || 0, 4) +
+    ' · ' + fmt(progress.skippedFromCheckpoint) + ' previously checkpointed PDF(s) skipped.';
+}
+
 async function selectBulkFolder() {
+  if (bulkRunning || bulkPreviewing) return;
   try {
     const result = await window.electronAPI.selectBulkFolder();
     if (!result?.selected) return;
     bulkSelected = true;
-    byId('bulk-folder-label').textContent = 'PDF folder selected; source path is not stored in the batch checkpoint.';
-    byId('bulk-start').disabled = false;
+    bulkInventory = null;
+    // Show the requested full path only on this local screen, not in logs.
+    byId('bulk-folder-label').textContent = result.path;
+    byId('bulk-folder-label').title = result.path;
+    byId('bulk-files-total').textContent = '—';
+    byId('bulk-pages-expected').textContent = '—';
+    byId('bulk-pages-done').textContent = '0';
+    byId('bulk-processed').textContent = '0';
+    byId('bulk-skipped').textContent = '0';
+    byId('bulk-review').textContent = '0';
+    byId('bulk-failed').textContent = '0';
+    bulkPreviewing = true;
+    byId('bulk-start').disabled = true;
+    byId('bulk-folder').disabled = true;
+    byId('bulk-stop').disabled = false;
+    byId('bulk-phase').textContent = 'Counting PDF files…';
+    byId('bulk-progress-note').textContent = 'Inventory in progress; this does not analyze pages or send PDF images externally.';
+    const inventory = await window.electronAPI.inspectBulkFolder();
+    bulkInventory = inventory.canceled ? null : inventory;
+    if (inventory.canceled) {
+      bulkSelected = false;
+    } else if (inventory.filesTotal === 0) {
+      byId('bulk-phase').textContent = 'No PDF files found';
+      showNotification('The selected folder contains no PDF files.', 'warning');
+    }
   } catch (_) {
-    showNotification('Could not select a PDF folder.', 'error');
+    bulkSelected = false;
+    byId('bulk-phase').textContent = 'Could not inventory folder';
+    byId('bulk-current').textContent = 'Check folder access and select it again.';
+    showNotification('Could not read the selected folder.', 'error');
+  } finally {
+    bulkPreviewing = false;
+    byId('bulk-folder').disabled = false;
+    byId('bulk-stop').disabled = true;
+    byId('bulk-start').disabled = !bulkSelected || !bulkInventory || bulkInventory.filesTotal === 0;
   }
 }
 async function startBulkAudit() {
-  if (!bulkSelected || bulkRunning) return;
+  if (!bulkSelected || bulkPreviewing || bulkRunning || !bulkInventory) return;
   const mode = analysisMode.value;
   if (mode !== 'local' && !hospitalApproved.checked) {
     showNotification('Confirm hospital authorization before cloud batch processing.', 'warning');
+    return;
+  }
+  const maxFiles = Number(byId('bulk-max-files').value);
+  const maxUsd = Number(byId('bulk-max-usd').value);
+  if (!Number.isSafeInteger(maxFiles) || maxFiles < 1 || maxFiles > 1000000) {
+    showNotification('Enter a valid per-session file limit.', 'warning');
+    return;
+  }
+  if (mode !== 'local' && (!Number.isFinite(maxUsd) || maxUsd < 0.01 || maxUsd > 100000)) {
+    showNotification('Enter a positive cloud API spending limit.', 'warning');
     return;
   }
   bulkRunning = true;
@@ -547,18 +683,12 @@ async function startBulkAudit() {
   byId('bulk-stop').disabled = false;
   analyzeFilesBtn.disabled = true;
   analysisMode.disabled = true;
-  byId('bulk-progress-note').textContent = 'Scanning the selected folder. Work is checkpointed after each PDF.';
+  renderBulkProgress({
+    ...bulkInventory, phase: 'running', processed: 0, pagesProcessed: 0,
+    skippedFromCheckpoint: 0, reviewRequired: 0, analysisFailed: 0,
+    filesSeen: 0, sessionTarget: Math.min(maxFiles, bulkInventory.filesTotal)
+  });
   try {
-    const maxFiles = Number(byId('bulk-max-files').value);
-    const maxUsd = Number(byId('bulk-max-usd').value);
-    if (!Number.isSafeInteger(maxFiles) || maxFiles < 1 || maxFiles > 1000000) {
-      showNotification('Enter a valid per-session file limit.', 'warning');
-      return;
-    }
-    if (mode !== 'local' && (!Number.isFinite(maxUsd) || maxUsd < 0.01 || maxUsd > 100000)) {
-      showNotification('Enter a positive cloud API spending limit.', 'warning');
-      return;
-    }
     const result = await window.electronAPI.runBulkAudit({
       mode, hospitalApproved: hospitalApproved.checked,
       retryFailed: byId('bulk-retry-failed').checked,
@@ -567,6 +697,8 @@ async function startBulkAudit() {
     renderBulkProgress(result);
     showNotification(result.stopped ? 'Folder audit paused. You can resume it.' : 'Folder audit completed.', 'success');
   } catch (_) {
+    byId('bulk-phase').textContent = 'Folder audit stopped unexpectedly';
+    byId('bulk-current').textContent = 'Check local configuration or source-folder permissions, then resume.';
     showNotification('Folder audit stopped with an error. You can resume after resolving the issue.', 'error');
   } finally {
     bulkRunning = false;
@@ -581,7 +713,9 @@ async function startBulkAudit() {
 async function stopBulkAudit() {
   byId('bulk-stop').disabled = true;
   await window.electronAPI.stopBulkAudit();
-  byId('bulk-progress-note').textContent = 'Stop requested; current PDF will finish before the checkpoint is saved.';
+  byId('bulk-current').textContent = bulkPreviewing
+    ? 'Canceling folder inventory after the current metadata check…'
+    : 'Stop requested; current PDF will finish before the checkpoint is saved.';
 }
 
 async function exportToExcel() {

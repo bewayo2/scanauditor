@@ -936,6 +936,50 @@ body {
     .cost-estimate-result { padding: 16px; }
 }
 
+/* Folder audit monitoring: private path in local renderer, phase + live counters */
+.bulk-path-display {
+    margin: 18px 0 12px;
+    padding: 14px 16px;
+    border: 1px solid #dce4ee;
+    border-radius: 10px;
+    background: #f7f9fc;
+}
+.bulk-path-display strong { display: block; color: #344256; font-size: 13px; margin-bottom: 6px; }
+.bulk-path-display code {
+    display: block;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 13px;
+    color: #233d62;
+    user-select: text;
+}
+.bulk-path-display .small-note { margin-bottom: 0; }
+.bulk-monitor {
+    padding: 16px;
+    margin: 14px 0;
+    border: 1px solid #dce4ee;
+    border-radius: 10px;
+    background: #f7f9fc;
+}
+.bulk-monitor-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+.bulk-monitor-header strong { font-size: 15px; color: #263547; }
+.bulk-monitor-header span { font-size: 13px; color: #4a5a72; font-variant-numeric: tabular-nums; }
+.bulk-monitor progress {
+    display: block;
+    width: 100%;
+    height: 16px;
+    overflow: hidden;
+    border-radius: 8px;
+    accent-color: #5269b3;
+}
+.bulk-monitor > .small-note { margin-top: 10px; margin-bottom: 0; }
+
 /* Human scan-quality review feedback (recorded without PHI). */
 .review-feedback {
     margin: 20px 0 4px;

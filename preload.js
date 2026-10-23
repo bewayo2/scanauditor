@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportToExcel: analysisResults => ipcRenderer.invoke('export-to-excel', analysisResults),
   exportQaEvidence: results => ipcRenderer.invoke('export-qa-evidence', results),
   selectBulkFolder: () => ipcRenderer.invoke('select-bulk-folder'),
+  inspectBulkFolder: () => ipcRenderer.invoke('inspect-bulk-folder'),
   runBulkAudit: options => ipcRenderer.invoke('run-bulk-audit', options),
   stopBulkAudit: () => ipcRenderer.invoke('stop-bulk-audit'),
   onBulkProgress: callback => {

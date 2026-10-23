@@ -15,13 +15,15 @@ const { AUDIT_CONFIG } = require('./audit_config');
 const { appendAuditRecord } = require('./audit_logger');
 const reviewDispositions = require('./review_dispositions');
 const { evidenceReport } = require('./evidence_report');
-const { runBulkAudit } = require('./bulk_audit');
+const { runBulkAudit, inspectBulkFolder } = require('./bulk_audit');
 
 let mainWindow;
 // In-memory only. Never save or log the hospital's API key.
 let sessionOpenAIKey = null;
 let selectedBulkRoot = null;
 let activeBulk = null;
+let activeBulkPreview = null;
+let bulkInventory = null;
 let activeAnalysis = false;
 let costResetPending = false;
 
@@ -335,21 +337,46 @@ ipcMain.handle('analyze-files', async (_event, request) => {
 });
 
 ipcMain.handle('select-bulk-folder', async () => {
-  if (activeBulk) throw new Error('Stop the active batch before choosing another folder.');
+  if (activeBulk || activeBulkPreview) throw new Error('Stop the current folder operation before selecting another folder.');
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Choose folder containing PDF records',
     properties: ['openDirectory']
   });
   if (result.canceled || !result.filePaths.length) return { selected: false };
   selectedBulkRoot = result.filePaths[0];
-  return { selected: true, description: 'Folder selected. The path is not written into the checkpoint.' };
+  bulkInventory = null;
+  // The folder path is shown ONLY inside this user's local Electron window.
+  // It never enters the persisted batch checkpoint, cost log, or cloud call.
+  return { selected: true, path: selectedBulkRoot };
+});
+ipcMain.handle('inspect-bulk-folder', async () => {
+  if (!selectedBulkRoot) throw new Error('Choose a PDF folder first.');
+  if (activeBulk || activeBulkPreview) throw new Error('Another folder operation is in progress.');
+  const cancellation = { requested: false };
+  const root = selectedBulkRoot;
+  activeBulkPreview = cancellation;
+  try {
+    const inventory = await inspectBulkFolder({
+      root, cancellation,
+      onProgress: progress => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('bulk-progress', progress);
+        }
+      }
+    });
+    if (!inventory.canceled && root === selectedBulkRoot) bulkInventory = inventory;
+    return inventory;
+  } finally {
+    activeBulkPreview = null;
+  }
 });
 ipcMain.handle('stop-bulk-audit', () => {
   if (activeBulk) activeBulk.requested = true;
-  return { stopping: Boolean(activeBulk) };
+  if (activeBulkPreview) activeBulkPreview.requested = true;
+  return { stopping: Boolean(activeBulk || activeBulkPreview) };
 });
 ipcMain.handle('run-bulk-audit', async (_event, request) => {
-  if (activeBulk || activeAnalysis || costResetPending) throw new Error('A scan or reset is already running.');
+  if (activeBulk || activeBulkPreview || activeAnalysis || costResetPending) throw new Error('A scan, inventory or reset is already running.');
   if (!selectedBulkRoot) throw new Error('Choose a folder of PDFs first.');
   const mode = request?.mode || 'local';
   if (!['local', 'tiered', 'astra'].includes(mode)) throw new Error('Unsupported mode.');
@@ -370,6 +397,7 @@ ipcMain.handle('run-bulk-audit', async (_event, request) => {
       maxUsd: Number.isFinite(request?.maxUsd) && request.maxUsd >= 0.01 && request.maxUsd <= 100000
         ? request.maxUsd : 5,
       cancellation,
+      inventory: bulkInventory,
       onProgress: progress => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('bulk-progress', progress);
