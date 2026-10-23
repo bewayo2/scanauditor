@@ -691,8 +691,8 @@ async function refreshCostDashboard() {
         '-page forecast (' + mode + '): ' + dollar(dashboard.targetProjectionUSD) +
         ' at ' + dollar(dashboard.targetForecastPerPageUSD, 8) + '/page using ' +
         sourceText + '.';
-  const basis = dashboard.plan.forecastBasis;
-  const fileSource = basis === 'historical'
+  const fileSource = dashboard.targetForecastSource === 'historical' ||
+    dashboard.targetForecastSource === 'historical-fallback'
     ? Number(dashboard.historicalFileCount || 0).toLocaleString('en-US') +
       ' fully metered files across comparable runs'
     : dashboard.forecastFileSample
