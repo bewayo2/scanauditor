@@ -7,7 +7,7 @@ const path = require('node:path');
 const os = require('node:os');
 const {
   usageCost, planningPerPage, summarizeCost, validatePlan, MODEL_PRICING,
-  getDashboard, recordRun, recordUsage, savePlan
+  getDashboard, recordRun, recordUsage, savePlan, resetCostHistory, listRuns
 } = require('../cost_tracker');
 
 const plan = { estimatedInputTokensPerPage: 5000, estimatedOutputTokensPerPage: 500, fallbackPercent: 10 };
@@ -249,4 +249,135 @@ test('forecast basis saves locally and invalid values return to latest-run defau
   assert.equal(result.plan.forecastBasis, 'historical');
   assert.equal(result.plan.targetPages, 1000000);
   assert.equal(validatePlan({ forecastBasis: 'not-a-mode' }).forecastBasis, 'latest-run');
+});
+
+
+test('specific-run forecast uses only its file count and spend, not all previous API charges', () => {
+  const prior = fourPageCostRun('prior');
+  const current = Array.from({ length: 4 }, (_, i) => ({
+    runId: 'current', model: 'gpt-6-luna', pageKey: 'other-pdf:' + (i + 1),
+    usage: { input_tokens: 5000, output_tokens: 500 }
+  }));
+  const runs = [
+    { runId: 'prior', mode: 'tiered', fileCount: 1, totalPages: 4, pagesUnknown: 0 },
+    { runId: 'current', mode: 'tiered', fileCount: 2, totalPages: 4, pagesUnknown: 0 }
+  ];
+  const p = { ...plan, targetFiles: 1000000, targetPages: 1000000,
+    forecastBasis: 'selected-run', selectedRunId: 'prior' };
+  const result = summarizeCost([...prior, ...current], p, 'tiered', runs[1], runs);
+  assert.equal(result.targetForecastSource, 'selected-run');
+  assert.equal(result.forecastFileSample.fileCount, 1);
+  assert.ok(Math.abs(result.targetForecastPerFileUSD - 0.038814) < 1e-10);
+  assert.ok(Math.abs(result.targetFilesProjectionUSD - 38814) < 1e-6);
+  assert.ok(Math.abs(result.targetProjectionUSD - 9703.50) < 1e-6);
+  assert.ok(Math.abs(result.recordedSpendUSD - 0.041814) < 1e-10);
+  assert.equal(result.run.runId, 'current');
+
+  const second = summarizeCost([...prior, ...current],
+    { ...p, selectedRunId: 'current' }, 'tiered', runs[1], runs);
+  assert.ok(Math.abs(second.targetForecastPerFileUSD - 0.0015) < 1e-10);
+  assert.ok(Math.abs(second.targetFilesProjectionUSD - 1500) < 1e-6);
+  assert.ok(Math.abs(second.recordedSpendUSD - result.recordedSpendUSD) < 1e-12);
+});
+
+test('historical per-file cost weights by actual file counts and excludes partial runs', () => {
+  const a = fourPageCostRun('a');
+  const b = Array.from({ length: 4 }, (_, i) => ({
+    runId: 'b', model: 'gpt-6-luna', pageKey: 'b:' + i,
+    usage: { input_tokens: 5000, output_tokens: 500 }
+  }));
+  const runs = [
+    { runId: 'a', mode: 'tiered', fileCount: 1, totalPages: 4 },
+    { runId: 'b', mode: 'tiered', fileCount: 2, totalPages: 4 }
+  ];
+  const r = summarizeCost([...a, ...b], { ...plan, forecastBasis: 'historical', targetFiles: 1000000 },
+    'tiered', runs[1], runs);
+  assert.equal(r.historicalFileCount, 3);
+  assert.ok(Math.abs(r.historicalFileSpendUSD - 0.041814) < 1e-10);
+  assert.ok(Math.abs(r.targetFilesProjectionUSD - 13938) < 1e-6);
+  // An incomplete run must not artificially make the per-file rate cheap.
+  const incomplete = summarizeCost([...a, ...b],
+    { ...plan, forecastBasis: 'historical', targetFiles: 1000000 },
+    'tiered', runs[1], [...runs, { runId: 'empty', mode: 'tiered', fileCount: 100, totalPages: 100 }]);
+  assert.equal(incomplete.historicalFileCount, 3);
+  assert.ok(Math.abs(incomplete.targetFilesProjectionUSD - r.targetFilesProjectionUSD) < 1e-10);
+});
+
+test('chosen run never silently borrows historical spend when missing or wrong model', () => {
+  const entries = fourPageCostRun('a');
+  const runs = [
+    { runId: 'a', mode: 'tiered', fileCount: 1, totalPages: 4 },
+    { runId: 'astra', mode: 'astra', fileCount: 1, totalPages: 4 }
+  ];
+  for (const id of ['missing', 'astra']) {
+    const d = summarizeCost(entries, { ...plan, forecastBasis: 'selected-run',
+      selectedRunId: id, targetFiles: 1000000, targetPages: 1000000 },
+      'tiered', runs[1], runs);
+    assert.equal(d.targetFilesProjectionUSD, null);
+    assert.equal(d.targetProjectionUSD, null);
+    assert.equal(d.targetForecastSource, 'selected-run-unavailable');
+    assert.ok(d.recordedSpendUSD > 0);
+  }
+});
+
+test('file forecast requires measured files; it does not assume a pages-per-file ratio', () => {
+  const p = validatePlan({ ...plan, forecastBasis: 'selected-run', targetFiles: 1000000 });
+  assert.equal(p.targetPages, null);
+  const d = summarizeCost([], p, 'tiered');
+  assert.equal(d.targetFilesProjectionUSD, null);
+  assert.equal(d.targetForecastPerFileUSD, null);
+  const h = summarizeCost([], { ...plan, targetFiles: 1000000,
+    forecastBasis: 'historical' }, 'tiered');
+  assert.equal(h.targetFilesProjectionUSD, null);
+});
+
+test('partial selected run projects unmetered page costs but does not pretend it was fully measured', () => {
+  const rows = [{
+    runId: 'partial', model: 'gpt-6-luna', pageKey: 'document:1',
+    usage: { input_tokens: 5000, output_tokens: 500 }
+  }];
+  const run = { runId: 'partial', mode: 'tiered', fileCount: 1, totalPages: 4 };
+  const d = summarizeCost(rows, { ...plan, forecastBasis: 'selected-run',
+    selectedRunId: 'partial', targetFiles: 10 }, 'tiered', run, [run]);
+  assert.ok(Math.abs(d.targetFilesProjectionUSD - 0.03) < 1e-8);
+  assert.equal(d.forecastFileSample.estimatedUnmeteredPages, true);
+});
+
+test('validated file-run planning persists and rejects invalid targets or identifiers', () => {
+  const p = validatePlan({ ...plan, forecastBasis: 'selected-run',
+    selectedRunId: 'a-1_2:3', targetFiles: '1000000' });
+  assert.equal(p.targetFiles, 1000000);
+  assert.equal(p.selectedRunId, 'a-1_2:3');
+  assert.equal(p.forecastBasis, 'selected-run');
+  assert.equal(validatePlan({ targetFiles: 0 }).targetFiles, null);
+  assert.equal(validatePlan({ targetFiles: 100000001 }).targetFiles, null);
+  assert.equal(validatePlan({ targetFiles: 2.2 }).targetFiles, null);
+  assert.equal(validatePlan({ selectedRunId: '../unsafe' }).selectedRunId, null);
+});
+
+test('global cost reset clears all local runs, token usage, and assumptions without touching other data', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'scanauditor-reset-test-'));
+  t.after(async () => fs.remove(dir));
+  const sentinel = path.join(dir, 'audit-log-not-costs.txt');
+  await fs.writeFile(sentinel, 'audit information must remain');
+  await savePlan(dir, { ...plan, targetFiles: 1000000, selectedRunId: 'a',
+    forecastBasis: 'selected-run' });
+  await recordUsage(dir, { runId: 'a', model: 'gpt-6-luna', pageKey: 'one:1',
+    usage: { input_tokens: 5000, output_tokens: 500 } });
+  await recordRun(dir, { runId: 'a', mode: 'tiered', fileCount: 1, totalPages: 1 });
+  assert.equal((await listRuns(dir)).length, 1);
+  assert.ok((await getDashboard(dir, 'tiered')).recordedSpendUSD > 0);
+  const cleared = await resetCostHistory(dir);
+  assert.deepEqual(cleared, { cleared: true });
+  assert.equal((await listRuns(dir)).length, 0);
+  const dashboard = await getDashboard(dir, 'tiered');
+  assert.equal(dashboard.run, null);
+  assert.equal(dashboard.recordedSpendUSD, 0);
+  assert.equal(dashboard.targetFiles, null);
+  assert.equal(dashboard.targetPages, null);
+  assert.equal(dashboard.plan.forecastBasis, 'latest-run');
+  assert.equal(dashboard.plan.selectedRunId, null);
+  assert.equal(await fs.readFile(sentinel, 'utf8'), 'audit information must remain');
+  await recordRun(dir, { runId: 'new', mode: 'local', fileCount: 1, totalPages: 1 });
+  assert.equal((await listRuns(dir)).length, 1);
 });
