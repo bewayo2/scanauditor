@@ -8,6 +8,7 @@ const ConfiguredAnalyzer = require('./configured_analyzer');
 const CloudScanAnalyzer = require('./cloud_analyzer');
 const { recordUsage, recordRun, usageCost } = require('./cost_tracker');
 const { evidenceReport } = require('./evidence_report');
+const pdfParse = require('pdf-parse');
 
 const MODES = new Set(['local', 'tiered', 'astra']);
 const MODIFIERS = Object.freeze({ maxDepth: 40 });
@@ -33,6 +34,92 @@ async function* walkPdfs(folder, depth = 0) {
     else if (item.isFile() && path.extname(item.name).toLowerCase() === '.pdf') yield candidate;
   }
 }
+
+// A metadata-only sample: never extract or store OCR, patient text, filenames or
+// source paths as part of progress reporting. PDF-parse is already required by
+// the normal analyzer. Restrict it to one rendered page for the page-count probe.
+async function readPdfPageCount(pdfPath) {
+  const document = await pdfParse(await fs.readFile(pdfPath), { max: 1 });
+  const count = Number(document.numpages);
+  if (!Number.isSafeInteger(count) || count < 1) throw new Error('Cannot count PDF pages');
+  return count;
+}
+
+// One streaming walk counts PDF files. A bounded reservoir gives a more
+// representative page-size sample than simply taking the first files, which
+// may all belong to one date/patient/visit. Nothing is written to disk.
+async function inspectBulkFolder({
+  root, onProgress = () => {}, cancellation = { requested: false },
+  sampleLimit = 60, readPageCount = readPdfPageCount
+} = {}) {
+  if (!root) throw new Error('Choose a folder of PDFs first.');
+  if (!Number.isInteger(sampleLimit) || sampleLimit < 1 || sampleLimit > 500) {
+    throw new Error('Invalid page sampling limit.');
+  }
+  const folder = await fs.realpath(root);
+  if (!(await fs.stat(folder)).isDirectory()) throw new Error('Choose a directory.');
+  let filesTotal = 0;
+  const reservoir = [];
+  let tick = Date.now();
+  const emit = progress => onProgress(progress);
+  emit({ phase: 'inventory', filesTotal: 0, sampledFiles: 0, estimatedPages: null });
+  for await (const filePath of walkPdfs(folder)) {
+    if (cancellation.requested) {
+      emit({ phase: 'canceled', filesTotal, estimatedPages: null });
+      return { canceled: true, filesTotal, estimatedPages: null };
+    }
+    filesTotal += 1;
+    if (reservoir.length < sampleLimit) {
+      reservoir.push(filePath);
+    } else {
+      const index = crypto.randomInt(filesTotal);
+      if (index < sampleLimit) reservoir[index] = filePath;
+    }
+    // Real time-based throttling avoids a million interprocess UI events.
+    if (Date.now() - tick >= 160 || filesTotal === 1) {
+      emit({ phase: 'inventory', filesTotal, sampledFiles: 0, estimatedPages: null });
+      tick = Date.now();
+    }
+  }
+  let sampledFiles = 0;
+  let sampledPages = 0;
+  let sampleFailed = 0;
+  tick = 0;
+  for (const filePath of reservoir) {
+    if (cancellation.requested) {
+      emit({ phase: 'canceled', filesTotal, sampledFiles, estimatedPages: null });
+      return { canceled: true, filesTotal, estimatedPages: null };
+    }
+    try {
+      const count = await readPageCount(filePath);
+      if (!Number.isSafeInteger(count) || count < 1) throw new Error('Bad PDF count');
+      sampledFiles += 1;
+      sampledPages += count;
+    } catch (_) {
+      // An unreadable or encrypted PDF reduces the quality of the estimate,
+      // but does not prevent the actual audit from continuing.
+      sampleFailed += 1;
+    }
+    if (Date.now() - tick >= 160 || sampledFiles + sampleFailed === reservoir.length) {
+      emit({ phase: 'sampling', filesTotal, sampledFiles, sampleFailed,
+        sampleTarget: reservoir.length, estimatedPages: null });
+      tick = Date.now();
+    }
+  }
+  const estimatedPages = sampledFiles ? Math.round(filesTotal * sampledPages / sampledFiles) : null;
+  const exact = sampledFiles === filesTotal && sampleFailed === 0;
+  const result = {
+    phase: 'ready', filesTotal, estimatedPages,
+    estimateKind: !sampledFiles ? 'unavailable' : exact ? 'exact-metadata' : 'sampled',
+    sampledFiles, sampleFailed, sampleTarget: reservoir.length,
+    averagePagesPerFile: sampledFiles ? sampledPages / sampledFiles : null,
+    // Inventory counts files, not actual analysis successes.
+    completedFiles: null
+  };
+  emit(result);
+  return result;
+}
+
 async function readJournal(file) {
   const states = new Map();
   if (!(await fs.pathExists(file))) return states;
@@ -52,7 +139,8 @@ async function readJournal(file) {
 async function runBulkAudit({
   root, userData, mode = 'local', apiKey = null, hospitalApproved = false,
   onProgress = () => {}, cancellation = { requested: false }, maxFiles = Infinity,
-  retryFailed = false, maxUsd = 5, analyzerFactory = null
+  retryFailed = false, maxUsd = 5, analyzerFactory = null,
+  inventory = null, readPageCount = readPdfPageCount
 } = {}) {
   if (!MODES.has(mode)) throw new Error('Unsupported bulk analysis mode.');
   if (!root || !userData) throw new Error('Choose a PDF folder.');
@@ -79,6 +167,14 @@ async function runBulkAudit({
   const journal = path.join(output, 'checkpoint.jsonl');
   const evidence = path.join(output, 'evidence.jsonl');
   const completed = await readJournal(journal);
+  // CLI can inventory on demand. Desktop may supply the in-memory preview for
+  // the currently selected folder; no patient paths are persisted or emitted.
+  if (!inventory || inventory.canceled || !Number.isSafeInteger(inventory.filesTotal) ||
+      inventory.filesTotal < 0) {
+    inventory = await inspectBulkFolder({ root: normalizedRoot, cancellation, onProgress, readPageCount });
+  }
+  if (inventory.canceled) return { ...inventory, stopped: true, processed: 0, skippedFromCheckpoint: 0,
+    reviewRequired: 0, analysisFailed: 0, pagesProcessed: 0, meteredSpendUSD: 0 };
   const runId = crypto.randomUUID();
   let meteredSpendUSD = 0;
   const onUsage = async entry => {
@@ -91,8 +187,13 @@ async function runBulkAudit({
   const counters = {
     filesSeen: 0, processed: 0, skippedFromCheckpoint: 0, passed: 0,
     reviewRequired: 0, analysisFailed: 0, pagesProcessed: 0,
-    stopped: false, runId, mode, meteredSpendUSD: 0, spendingLimitUSD: mode === 'local' ? null : maxUsd
+    stopped: false, runId, mode, meteredSpendUSD: 0, spendingLimitUSD: mode === 'local' ? null : maxUsd,
+    phase: 'running', filesTotal: inventory.filesTotal, estimatedPages: inventory.estimatedPages,
+    estimateKind: inventory.estimateKind, sampledFiles: inventory.sampledFiles,
+    sampleFailed: inventory.sampleFailed, currentFileNumber: null,
+    sessionTarget: Math.min(maxFiles, inventory.filesTotal), finished: false
   };
+  onProgress({ ...counters });
   try {
     for await (const pdfPath of walkPdfs(normalizedRoot)) {
       if (cancellation.requested || counters.processed >= maxFiles ||
@@ -101,14 +202,20 @@ async function runBulkAudit({
         break;
       }
       counters.filesSeen += 1;
+      counters.currentFileNumber = counters.filesSeen;
       const fileStat = await fs.stat(pdfPath);
       const key = makeFileKey(state.secret, path.relative(normalizedRoot, pdfPath), fileStat);
       const prior = completed.get(key);
       if (prior && (prior !== 'analysis-failed' || !retryFailed)) {
         counters.skippedFromCheckpoint += 1;
-        if (counters.filesSeen % 25 === 0) onProgress({ ...counters });
+        // Progress reporting is PHI-free: only counters, never file names.
+        if (counters.filesSeen === 1 || counters.filesSeen % 25 === 0) {
+          onProgress({ ...counters, phase: 'running' });
+        }
         continue;
       }
+      counters.phase = 'processing';
+      onProgress({ ...counters });
       let result;
       try {
         result = await analyzer.analyzeFile({ path: pdfPath, originalname: path.basename(pdfPath) });
@@ -136,9 +243,14 @@ async function runBulkAudit({
         key, status: safeStatus, timestamp: new Date().toISOString()
       }) + '\n');
       completed.set(key, safeStatus);
-      if (counters.processed % 10 === 0) onProgress({ ...counters });
+      counters.currentFileNumber = null;
+      counters.phase = 'running';
+      onProgress({ ...counters });
     }
   } finally {
+    counters.currentFileNumber = null;
+    counters.finished = true;
+    counters.phase = counters.stopped ? 'stopped' : 'completed';
     await recordRun(userData, {
       runId, mode, fileCount: counters.processed, totalPages: counters.pagesProcessed,
       pagesUnknown: counters.analysisFailed
@@ -148,4 +260,4 @@ async function runBulkAudit({
   return { ...counters, jobId: path.basename(output),
     disclaimer: 'Batch checkpoint and evidence contain no patient text. Paper completeness still requires independent source comparison.' };
 }
-module.exports = { runBulkAudit, walkPdfs, readJournal, makeFileKey, jobDirectory };
+module.exports = { runBulkAudit, inspectBulkFolder, walkPdfs, readJournal, makeFileKey, jobDirectory };
