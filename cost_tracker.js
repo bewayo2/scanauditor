@@ -193,8 +193,8 @@ function summarizeCost(entries, plan, mode = 'tiered', lastRun = null, runs = []
     targetForecastSource = historicalPerPage === null ? 'planning-assumption' :
       p.forecastBasis === 'historical' ? 'historical' : 'historical-fallback';
   }
-  const forecastFileSample = p.forecastBasis === 'selected-run' ? selected :
-    p.forecastBasis === 'latest-run' ? latestMatching : null;
+  const forecastFileSample = targetForecastSource === 'selected-run' ? selected :
+    targetForecastSource === 'latest-run' ? latestMatching : null;
   // The UI lists recent run IDs/dates/counts only. No filenames or patient data.
   const recentRuns = runSamples.slice(-200).reverse().map(item => ({
     runId: item.runId, timestamp: item.timestamp, mode: item.mode,
