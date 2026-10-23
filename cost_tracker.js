@@ -13,6 +13,8 @@ const MODEL_PRICING = Object.freeze({
 });
 const DEFAULT_PLAN = Object.freeze({
   targetPages: null,
+  targetFiles: null,
+  selectedRunId: null,
   forecastBasis: 'latest-run',
   estimatedInputTokensPerPage: 5000,
   estimatedOutputTokensPerPage: 500,
@@ -26,7 +28,13 @@ function finiteRange(value, fallback, min, max) {
 function validatePlan(value = {}) {
   return {
     // Latest matching run is preferred; history counts scans, not unique documents.
-    forecastBasis: value.forecastBasis === 'historical' ? 'historical' : 'latest-run',
+    forecastBasis: ['historical', 'selected-run'].includes(value.forecastBasis) ? value.forecastBasis : 'latest-run',
+    selectedRunId: typeof value.selectedRunId === 'string' && /^[a-zA-Z0-9:_-]{1,100}$/.test(value.selectedRunId)
+      ? value.selectedRunId : null,
+    targetFiles: value.targetFiles === '' || value.targetFiles == null ||
+      !Number.isSafeInteger(Number(value.targetFiles)) ||
+      Number(value.targetFiles) < 1 || Number(value.targetFiles) > 100000000
+      ? null : Number(value.targetFiles),
     // Optional extrapolation, never the page count of the current run.
     targetPages: value.targetPages === '' || value.targetPages == null ||
       !Number.isSafeInteger(Number(value.targetPages)) ||
@@ -52,12 +60,13 @@ function planningPerPage(plan, mode = 'tiered') {
   if (mode === 'local') return 0;
   return usageCost('gpt-6-luna', tokens) + p.fallbackPercent / 100 * usageCost('gpt-6.1-sol', tokens);
 }
-function summarizeCost(entries, plan, mode = 'tiered', lastRun = null) {
+function summarizeCost(entries, plan, mode = 'tiered', lastRun = null, runs = []) {
   const p = validatePlan(plan);
   const allPages = new Set();
   const runPages = new Set();
   const historicalPages = new Set();
   const historicalRunIds = new Set();
+  const selectedRunMetrics = new Map();
   const selectedModeModels = mode === 'astra'
     ? new Set(['gpt-6-astra'])
     : mode === 'tiered' ? new Set(['gpt-6-luna', 'gpt-6.1-sol']) : new Set();
@@ -82,6 +91,10 @@ function summarizeCost(entries, plan, mode = 'tiered', lastRun = null) {
     if (pageKey) allPages.add(JSON.stringify([runId || 'legacy', pageKey]));
     if (selectedModeModels.has(entry.model)) {
       if (runId) {
+        if (!selectedRunMetrics.has(runId)) selectedRunMetrics.set(runId, { spendUSD: 0, pages: new Set() });
+        const sample = selectedRunMetrics.get(runId);
+        sample.spendUSD += cost;
+        if (pageKey) sample.pages.add(pageKey);
         historicalSpendUSD += cost;
         if (pageKey) {
           historicalPages.add(JSON.stringify([runId, pageKey]));
@@ -111,24 +124,93 @@ function summarizeCost(entries, plan, mode = 'tiered', lastRun = null) {
   const unmeteredRunPages = Math.max(0, knownPages - meteredRunPages);
   const runProjectedTotalUSD = runSpendUSD + unmeteredRunPages * runPerPage;
 
-  // Never use a local/Astra run to set Luna/Sol's "latest run" price (or vice versa).
-  const matchingLatestPerPage = lastRun?.mode === mode ? observedRunPerPage : null;
-  const historicalPerPage = historicalPages.size
-    ? historicalSpendUSD / historicalPages.size : null;
+  // Build run samples from the run ledger, never infer file counts from OCR
+  // usage events. Only runs in the chosen model mode may set a per-file rate.
+  const seen = new Set();
+  const allRecordedRuns = Array.isArray(runs) && runs.length ? runs : lastRun ? [lastRun] : [];
+  const runSamples = [];
+  for (const record of allRecordedRuns) {
+    if (!record || typeof record.runId !== 'string' || seen.has(record.runId)) continue;
+    seen.add(record.runId);
+    if (!['tiered', 'astra', 'local'].includes(record.mode)) continue;
+    const fileCount = Number(record.fileCount);
+    const totalPages = Number(record.totalPages);
+    const pagesUnknown = Number(record.pagesUnknown) || 0;
+    const sample = selectedRunMetrics.get(record.runId);
+    const spendUSD = record.mode === mode ? (sample?.spendUSD || 0) : 0;
+    const meteredPages = record.mode === mode ? (sample?.pages.size || 0) : 0;
+    const usableCount = Number.isSafeInteger(fileCount) && fileCount > 0 &&
+      Number.isSafeInteger(totalPages) && totalPages >= 0 &&
+      Number.isSafeInteger(pagesUnknown) && pagesUnknown === 0 &&
+      (record.mode === 'local' || meteredPages > 0);
+    const extraPages = Math.max(0, totalPages - meteredPages);
+    const extrapolatedSpendUSD = record.mode === 'local' ? 0 :
+      meteredPages ? spendUSD + extraPages * spendUSD / meteredPages : null;
+    runSamples.push({
+      runId: record.runId, timestamp: String(record.timestamp || ''),
+      mode: record.mode, fileCount: Number.isSafeInteger(fileCount) && fileCount >= 0 ? fileCount : 0,
+      totalPages: Number.isSafeInteger(totalPages) && totalPages >= 0 ? totalPages : 0,
+      pagesUnknown, meteredPages, recordedSpendUSD: spendUSD,
+      observedPerPageUSD: meteredPages ? spendUSD / meteredPages : null,
+      forecastPerFileUSD: usableCount ? extrapolatedSpendUSD / fileCount : null,
+      estimatedUnmeteredPages: usableCount && extraPages > 0
+    });
+  }
+  const matchingRuns = runSamples.filter(item => item.mode === mode);
+  const latestMatching = matchingRuns.length ? matchingRuns[matchingRuns.length - 1] : null;
+  const selected = p.selectedRunId ? matchingRuns.find(item => item.runId === p.selectedRunId) : null;
+  // Historical file weighting counts files processed in comparable runs,
+  // rather than assigning equal influence to one-file and thousand-file runs.
+  // Partial scans are excluded: otherwise the per-file rate is understated.
+  const historicalFileSamples = matchingRuns.filter(item =>
+    item.forecastPerFileUSD !== null && item.pagesUnknown === 0 &&
+    (mode === 'local' || item.meteredPages === item.totalPages));
+  const historicalFileCount = historicalFileSamples.reduce((sum, item) => sum + item.fileCount, 0);
+  const historicalFileSpendUSD = historicalFileSamples.reduce((sum, item) => sum + item.recordedSpendUSD, 0);
+  const historicalPerFile = historicalFileCount ? historicalFileSpendUSD / historicalFileCount : null;
+
   let targetPerPage;
+  let targetPerFile;
   let targetForecastSource;
   if (mode === 'local') {
     targetPerPage = 0;
+    targetPerFile = 0;
     targetForecastSource = 'local';
-  } else if (p.forecastBasis === 'latest-run' && matchingLatestPerPage !== null) {
-    targetPerPage = matchingLatestPerPage;
+  } else if (p.forecastBasis === 'selected-run') {
+    // Strict isolation: never silently replace the chosen run with history.
+    targetPerPage = selected?.observedPerPageUSD ?? null;
+    targetPerFile = selected?.forecastPerFileUSD ?? null;
+    targetForecastSource = targetPerPage === null ? 'selected-run-unavailable' : 'selected-run';
+  } else if (p.forecastBasis === 'latest-run' && latestMatching?.observedPerPageUSD !== null &&
+      latestMatching?.observedPerPageUSD !== undefined) {
+    targetPerPage = latestMatching.observedPerPageUSD;
+    targetPerFile = latestMatching.forecastPerFileUSD;
     targetForecastSource = 'latest-run';
-  } else if (historicalPerPage !== null) {
-    targetPerPage = historicalPerPage;
-    targetForecastSource = p.forecastBasis === 'historical' ? 'historical' : 'historical-fallback';
   } else {
-    targetPerPage = planningPerPage(p, mode);
-    targetForecastSource = 'planning-assumption';
+    const historicalPerPage = historicalPages.size ? historicalSpendUSD / historicalPages.size : null;
+    targetPerPage = historicalPerPage === null ? planningPerPage(p, mode) : historicalPerPage;
+    targetPerFile = historicalPerFile;
+    targetForecastSource = historicalPerPage === null ? 'planning-assumption' :
+      p.forecastBasis === 'historical' ? 'historical' : 'historical-fallback';
+  }
+  const forecastFileSample = p.forecastBasis === 'selected-run' ? selected :
+    p.forecastBasis === 'latest-run' ? latestMatching : null;
+  // The UI lists recent run IDs/dates/counts only. No filenames or patient data.
+  const recentRuns = runSamples.slice(-200).reverse().map(item => ({
+    runId: item.runId, timestamp: item.timestamp, mode: item.mode,
+    fileCount: item.fileCount, totalPages: item.totalPages,
+    meteredPages: item.meteredPages,
+    recordedSpendUSD: item.recordedSpendUSD,
+    fileRateAvailable: item.forecastPerFileUSD !== null && item.mode !== 'local'
+  }));
+  if (selected && !recentRuns.some(item => item.runId === selected.runId)) {
+    recentRuns.push({
+      runId: selected.runId, timestamp: selected.timestamp, mode: selected.mode,
+      fileCount: selected.fileCount, totalPages: selected.totalPages,
+      meteredPages: selected.meteredPages,
+      recordedSpendUSD: selected.recordedSpendUSD,
+      fileRateAvailable: selected.forecastPerFileUSD !== null
+    });
   }
 
   return {
@@ -152,10 +234,21 @@ function summarizeCost(entries, plan, mode = 'tiered', lastRun = null) {
     historicalPerPageUSD: historicalPerPage,
     legacySpendExcludedUSD,
     targetPages: p.targetPages,
+    targetFiles: p.targetFiles,
     targetForecastPerPageUSD: targetPerPage,
-    targetProjectionUSD: p.targetPages === null ? null : targetPerPage * p.targetPages,
+    targetProjectionUSD: p.targetPages === null || targetPerPage === null ? null : targetPerPage * p.targetPages,
+    targetForecastPerFileUSD: targetPerFile,
+    targetFilesProjectionUSD: p.targetFiles === null || targetPerFile === null ? null : targetPerFile * p.targetFiles,
+    forecastFileSample: forecastFileSample ? {
+      runId: forecastFileSample.runId, fileCount: forecastFileSample.fileCount,
+      meteredPages: forecastFileSample.meteredPages,
+      totalPages: forecastFileSample.totalPages,
+      estimatedUnmeteredPages: forecastFileSample.estimatedUnmeteredPages
+    } : null,
+    historicalFileCount, historicalFileSpendUSD,
+    runs: recentRuns,
     targetForecastSource,
-    targetCostBasis: ['latest-run', 'historical', 'historical-fallback'].includes(targetForecastSource)
+    targetCostBasis: ['latest-run', 'selected-run', 'historical', 'historical-fallback'].includes(targetForecastSource)
       ? 'observed-api-usage' : 'planning-assumption',
     disclaimer: 'API usage estimates only, not the provider invoice. Excludes unmetered failed requests, taxes, special processing tiers and other account activity.'
   };
@@ -199,18 +292,30 @@ async function recordRun(userData, run) {
   await fs.ensureDir(costDirectory(userData));
   await fs.appendFile(path.join(costDirectory(userData), 'runs.jsonl'), JSON.stringify(safe) + '\n');
 }
-async function latestRun(userData) {
+async function listRuns(userData) {
   const file = path.join(costDirectory(userData), 'runs.jsonl');
-  if (!(await fs.pathExists(file))) return null;
-  let last = null;
+  if (!(await fs.pathExists(file))) return [];
+  const result = [];
   const reader = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
   for await (const line of reader) {
     try {
-      const candidate = JSON.parse(line);
-      if (candidate?.runId && ['local', 'tiered', 'astra'].includes(candidate.mode)) last = candidate;
-    } catch (_) { /* Ignore interrupted trailing write. */ }
+      const record = JSON.parse(line);
+      if (record && typeof record.runId === 'string' &&
+          /^[a-zA-Z0-9:_-]{1,100}$/.test(record.runId) &&
+          ['local', 'tiered', 'astra'].includes(record.mode)) result.push(record);
+    } catch (_) { /* Ignore interrupted trailing append. */ }
   }
-  return last;
+  return result;
+}
+async function latestRun(userData) {
+  const runs = await listRuns(userData);
+  return runs.length ? runs[runs.length - 1] : null;
+}
+async function resetCostHistory(userData) {
+  // Only removes this app's local cost ledger and assumptions; no API billing
+  // records, audit evidence, PDFs, or bulk processing checkpoints are touched.
+  await fs.remove(costDirectory(userData));
+  return { cleared: true };
 }
 async function getDashboard(userData, mode = 'tiered') {
   const entries = [];
@@ -228,6 +333,8 @@ async function getDashboard(userData, mode = 'tiered') {
       } catch (_) { /* Ignore truncated line if a process was interrupted. */ }
     }
   }
-  return summarizeCost(entries, await loadPlan(userData), mode, await latestRun(userData));
+  const runs = await listRuns(userData);
+  return summarizeCost(entries, await loadPlan(userData), mode,
+    runs.length ? runs[runs.length - 1] : null, runs);
 }
-module.exports = { MODEL_PRICING, DEFAULT_PLAN, validatePlan, usageCost, planningPerPage, summarizeCost, loadPlan, savePlan, recordUsage, recordRun, getDashboard };
+module.exports = { MODEL_PRICING, DEFAULT_PLAN, validatePlan, usageCost, planningPerPage, summarizeCost, loadPlan, savePlan, recordUsage, recordRun, getDashboard, listRuns, resetCostHistory };
