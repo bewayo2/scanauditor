@@ -21,5 +21,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getReviewDisposition: hash => ipcRenderer.invoke('get-review-disposition', hash),
   saveReviewDisposition: payload => ipcRenderer.invoke('save-review-disposition', payload),
   getCostDashboard: mode => ipcRenderer.invoke('get-cost-dashboard', mode),
-  saveCostPlan: plan => ipcRenderer.invoke('save-cost-plan', plan)
+  saveCostPlan: plan => ipcRenderer.invoke('save-cost-plan', plan),
+  resetCostHistory: () => ipcRenderer.invoke('reset-cost-history')
 });

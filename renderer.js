@@ -24,7 +24,9 @@ const apiKeyStatus = byId('openai-key-status');
 const hospitalApproved = byId('hospital-approved');
 const costFields = {
   targetPages: byId('forecast-target-pages'),
+  targetFiles: byId('forecast-target-files'),
   forecastBasis: byId('forecast-basis'),
+  selectedRunId: byId('forecast-selected-run'),
   estimatedInputTokensPerPage: byId('planning-input-tokens'),
   estimatedOutputTokensPerPage: byId('planning-output-tokens'),
   fallbackPercent: byId('fallback-percent')
@@ -651,24 +653,66 @@ async function refreshCostDashboard() {
       (run.pagesUnknown ? run.pagesUnknown + ' file(s) had unknown page count. ' : '') +
       (run.costBasis === 'observed-api-usage' ? 'Per-page estimate uses reported API usage. ' : 'Per-page estimate uses planning assumptions. ') +
       'Mode: ' + run.mode + '.';
+  const selector = byId('forecast-selected-run');
+  selector.replaceChildren();
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Choose a run (mode: ' + mode + ')';
+  selector.appendChild(placeholder);
+  for (const item of dashboard.runs || []) {
+    if (item.mode !== mode) continue;
+    const option = document.createElement('option');
+    option.value = item.runId;
+    const date = item.timestamp ? item.timestamp.slice(0, 16).replace('T', ' ') : 'Undated';
+    option.textContent = date + ' — ' + Number(item.fileCount).toLocaleString('en-US') +
+      ' file(s), ' + Number(item.totalPages).toLocaleString('en-US') +
+      ' pages, ' + dollar(item.recordedSpendUSD, 6) +
+      (item.fileRateAvailable ? '' : ' (insufficient metered data)');
+    selector.appendChild(option);
+  }
+  selector.value = dashboard.plan.selectedRunId || '';
+  if (selector.selectedIndex === -1) selector.value = '';
   const forecastSources = {
-    'latest-run': 'latest matching scan run (' + (run?.meteredPages || 0) + ' metered pages)',
-    'historical': 'historical average (' + dashboard.historicalMeteredPages +
-      ' metered page-runs across ' + dashboard.historicalMeteredRuns + ' runs; repeated scans counted)',
-    'historical-fallback': 'historical average (no metered latest run for this model mode)',
-    'planning-assumption': 'token-based planning assumptions (no comparable metered scans)',
-    'local': 'no paid API calls in local mode'
+    'latest-run': 'latest recorded run in this model mode',
+    'selected-run': 'only the chosen run; older runs excluded',
+    'selected-run-unavailable': 'selected-run data unavailable; no historical fallback',
+    'historical': 'historical average across matching runs',
+    'historical-fallback': 'historical average because no comparable latest run exists',
+    'planning-assumption': 'token-based assumptions (no comparable paid page data)',
+    'local': 'local processing (no OpenAI API charges)'
   };
-  const sourceText = forecastSources[dashboard.targetForecastSource] || 'estimated API usage';
+  const sourceText = forecastSources[dashboard.targetForecastSource] || 'available samples';
   byId('cost-target-projection').textContent = dashboard.targetPages === null
-    ? 'Optional future-project forecast: none entered. Last-run totals use the PDFs analyzed.'
-    : 'Optional ' + Number(dashboard.targetPages).toLocaleString('en-US') +
-      '-page forecast (' + mode + '): ' + dollar(dashboard.targetProjectionUSD) +
-      ' at ' + dollar(dashboard.targetForecastPerPageUSD, 8) + '/page using ' +
-      sourceText + '. Cumulative API spending is tracked separately.' +
-      (dashboard.legacySpendExcludedUSD > 0
-        ? ' Usage from older untagged runs remains in cumulative spend but cannot be used to calculate a reliable historical per-page average.'
-        : '');
+    ? 'Future-page forecast: none entered.'
+    : dashboard.targetProjectionUSD === null
+      ? 'For ' + Number(dashboard.targetPages).toLocaleString('en-US') +
+        ' pages: unavailable. Choose a matching run with measured page usage.'
+      : 'Optional ' + Number(dashboard.targetPages).toLocaleString('en-US') +
+        '-page forecast (' + mode + '): ' + dollar(dashboard.targetProjectionUSD) +
+        ' at ' + dollar(dashboard.targetForecastPerPageUSD, 8) + '/page using ' +
+        sourceText + '.';
+  const fileSource = dashboard.targetForecastSource === 'historical' ||
+    dashboard.targetForecastSource === 'historical-fallback'
+    ? Number(dashboard.historicalFileCount || 0).toLocaleString('en-US') +
+      ' fully metered files across comparable runs'
+    : dashboard.forecastFileSample
+      ? dashboard.forecastFileSample.fileCount + ' file(s), ' +
+        dashboard.forecastFileSample.meteredPages + '/' +
+        dashboard.forecastFileSample.totalPages + ' pages metered in the reference run'
+      : 'no compatible reference run';
+  byId('cost-target-files-projection').textContent = dashboard.targetFiles === null
+    ? 'Future-file forecast: none entered. Enter a number of files to project.'
+    : dashboard.targetFilesProjectionUSD === null
+      ? 'For ' + Number(dashboard.targetFiles).toLocaleString('en-US') +
+        ' files: cost unavailable. A recorded, matching run with usable file and page counts is needed; ' +
+        'a page-only token estimate cannot establish pages per file.'
+      : 'Optional ' + Number(dashboard.targetFiles).toLocaleString('en-US') +
+        '-file forecast (' + mode + '): ' + dollar(dashboard.targetFilesProjectionUSD) +
+        ' at ' + dollar(dashboard.targetForecastPerFileUSD, 8) + '/file based on ' +
+        fileSource + '. ' +
+        (dashboard.forecastFileSample?.estimatedUnmeteredPages
+          ? 'Unmetered pages were estimated; verify results before budgeting. ' : '') +
+        'This is not cumulative recorded spending.';
   return dashboard;
 }
 function setPlanInputs(plan) {
@@ -695,7 +739,7 @@ async function clearApiKey() {
 async function saveCostSettings() {
   const plan = {};
   for (const [key, input] of Object.entries(costFields)) {
-    plan[key] = key === 'forecastBasis' ? input.value
+    plan[key] = key === 'forecastBasis' || key === 'selectedRunId' ? input.value
       : input.value === '' ? null : Number(input.value);
   }
   try {
@@ -707,10 +751,22 @@ async function saveCostSettings() {
     showNotification('Could not save cost settings.', 'error');
   }
 }
+async function resetCostHistory() {
+  try {
+    const response = await window.electronAPI.resetCostHistory();
+    if (!response?.cleared) return;
+    const dashboard = await refreshCostDashboard();
+    setPlanInputs(dashboard.plan);
+    showNotification('Local cost history and forecast assumptions reset. Provider charges are unchanged.', 'success');
+  } catch (_) {
+    showNotification('Could not reset costs. Stop active scans before trying again.', 'error');
+  }
+}
 analysisMode.addEventListener('change', showCloudControls);
 byId('save-openai-key').addEventListener('click', configureApiKey);
 byId('clear-openai-key').addEventListener('click', clearApiKey);
 byId('save-cost-plan').addEventListener('click', saveCostSettings);
+byId('reset-cost-history').addEventListener('click', resetCostHistory);
 selectFilesBtn.addEventListener('click', handleFileSelection);
 clearFilesBtn.addEventListener('click', () => {
   selectedFiles = [];

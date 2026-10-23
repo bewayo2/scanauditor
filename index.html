@@ -60,14 +60,19 @@
         </div>
         <p id="cost-basis" class="small-note">Run a PDF to see the page-based cost breakdown.</p>
         <div class="cost-planning">
+          <div><label for="forecast-target-files">Optional future target (files)</label><input type="number" id="forecast-target-files" min="1" max="100000000" step="1" placeholder="e.g. 1000000" /></div>
           <div><label for="forecast-target-pages">Optional future target (pages)</label><input type="number" id="forecast-target-pages" min="1" max="100000000" step="1" placeholder="Leave blank" /></div>
-          <div><label for="forecast-basis">Future forecast uses</label><select id="forecast-basis"><option value="latest-run">Latest matching run (default)</option><option value="historical">Historical average across runs</option></select></div>
+          <div><label for="forecast-basis">Future forecast uses</label><select id="forecast-basis"><option value="latest-run">Latest matching run (default)</option><option value="selected-run">Only a selected run (ignore history)</option><option value="historical">Historical average across runs</option></select></div>
+          <div><label for="forecast-selected-run">Cost reference run</label><select id="forecast-selected-run"><option value="">Choose a previous run</option></select></div>
           <div><label for="planning-input-tokens">Estimated input tokens / page</label><input type="number" id="planning-input-tokens" min="1" max="1000000" step="100" value="5000" /></div>
           <div><label for="planning-output-tokens">Estimated output tokens / page</label><input type="number" id="planning-output-tokens" min="1" max="100000" step="100" value="500" /></div>
           <div><label for="fallback-percent">Estimated Sol fallback %</label><input type="number" id="fallback-percent" min="0" max="100" step="1" value="10" /></div>
-          <button id="save-cost-plan" type="button" class="btn btn-secondary">Save Cost Assumptions</button>
+          <button id="save-cost-plan" type="button" class="btn btn-secondary">Save Forecast Settings</button>
         </div>
-        <p id="cost-target-projection" class="small-note">Optional future-project forecast: none entered.</p>
+        <p id="cost-target-files-projection" class="small-note">Future-file forecast: enter a file count and choose a recorded run or a historical average.</p>
+        <p id="cost-target-projection" class="small-note">Future-page forecast: none entered.</p>
+        <div class="file-actions"><button id="reset-cost-history" type="button" class="btn btn-secondary">Reset All Cost History</button></div>
+        <p class="small-note">Reset permanently deletes this computer's API usage ledger, run-cost history, and forecast settings after confirmation. It cannot reverse API charges or delete provider invoices, PDF files, QA evidence, or batch checkpoints.</p>
         <p class="small-note">If a scan fails or some pages return no API token usage, the remaining pages are estimated separately. Future-page projections never replace the actual page total of the last run.</p>
       </section>
 
