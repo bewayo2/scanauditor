@@ -18,6 +18,9 @@ OUTCOMES = {
     "model-false-positive": "digital-only",
     "source-issue-confirmed": "paper-compared",
     "scan-defect-confirmed": "paper-compared",
+    "folder-match-verified": "digital-only",
+    "folder-mismatch-confirmed": "digital-only",
+    "identity-ocr-false-positive": "digital-only",
     "inconclusive": "undetermined",
 }
 STATUSES = {"passed", "review-required", "analysis-failed"}
@@ -38,13 +41,116 @@ def valid_id(value):
     return type(value) is int and 0 < value < 2**63
 
 
+
+# Contextual / provenance observations must not independently drive a
+# scan-fidelity remediation queue. Preserve originals in document_runs.
+NON_MATERIAL_CONTEXT_CODES = {
+    "UNRESOLVED_PAGE", "MULTIPLE_PATIENT_IDENTIFIERS",
+    "EXACT_DUPLICATE", "POSSIBLE_DUPLICATE"
+}
+NON_MATERIAL_MESSAGES = {
+    "UNRESOLVED_PAGE": "Uncertain association of unnumbered pages is not proof of a scanning defect.",
+    "MULTIPLE_PATIENT_IDENTIFIERS": "Multiple OCR name candidates may reflect other people or text recognition variations; they do not prove a scanning defect.",
+    "EXACT_DUPLICATE": "Identical digital pages alone do not establish material scan loss.",
+    "POSSIBLE_DUPLICATE": "Similar-looking pages alone do not establish material scan loss."
+}
+
+def reclassify_non_material_findings(db):
+    """One-way policy reclassification of current case summaries only.
+
+    Preserve immutable document_runs evidence and human review events. The
+    evidence export reconstructs an up-to-date envelope from the current
+    assessment, while prior evidentiary snapshots remain intact.
+    """
+    changed = 0
+    last_id = 0
+    while True:
+        rows = db.execute("""SELECT id, analysis_json FROM documents
+          WHERE id>? AND qa_status='review-required' ORDER BY id LIMIT 200""",
+          (last_id,)).fetchall()
+        if not rows:
+            break
+        for row in rows:
+            last_id = row["id"]
+            try:
+                analysis = json.loads(row["analysis_json"])
+                qa = analysis.get("qaAssessment") or {}
+                findings = qa.get("findings") or []
+                if not isinstance(findings, list):
+                    continue
+                moved = [f for f in findings if isinstance(f, dict) and
+                         f.get("code") in NON_MATERIAL_CONTEXT_CODES]
+                if not moved:
+                    continue
+                retained = [f for f in findings if f not in moved]
+                old_info = qa.get("informationalFindings") or []
+                informational = list(old_info) if isinstance(old_info, list) else []
+                for finding in moved:
+                    corrected = dict(finding)
+                    corrected["message"] = NON_MATERIAL_MESSAGES[corrected["code"]]
+                    informational.append(corrected)
+                qa["findings"] = retained
+                qa["informationalFindings"] = informational
+                qa["originalAutomatedStatus"] = qa.get("status")
+                qa["policyReclassified"] = True
+                qa["status"] = "review-required" if retained else "passed"
+                qa["reason"] = ("One or more potential material scanning defects require review."
+                    if retained else "No material scan-fidelity defect was detected by automated checks. "
+                    "This does not verify source-paper completeness or record identity.")
+                def table(findings):
+                    result = []
+                    for item in findings:
+                        if not isinstance(item, dict):
+                            continue
+                        pages = item.get("pages") or []
+                        pages = [p for p in pages if type(p) is int and p > 0]
+                        result.append({"issueType": item.get("code", "").replace("_", " "),
+                          "count": len(pages) or 1,
+                          "pagesAffected": ", ".join(str(p) for p in pages) if pages else "Document",
+                          "description": item.get("message", "")})
+                    return result
+                analysis["summaryTable"] = table(retained)
+                analysis["informationalTable"] = table(informational)
+                analysis["priorityIssues"] = [f.get("message", "") for f in retained]
+                sources = {"PRINTED_PAGE_SEQUENCE_GAP", "POSSIBLE_TRAILING_PAGES",
+                    "POSSIBLY_BLANK_PAGE", "UNREADABLE_PAGE", "POSSIBLE_CUTOFF",
+                    "POSSIBLE_INCOMPLETE_PAGE", "BLURRY_PAGE", "DARK_PAGE",
+                    "LIGHT_PAGE", "ORIENTATION_ISSUE"}
+                pages = sorted({p for f in retained if f.get("code") in sources
+                    for p in f.get("pages", []) if type(p) is int and p > 0})
+                recommendations = analysis.get("recommendations") or {}
+                recommendations["manualReview"] = list(dict.fromkeys(
+                    f.get("message", "") for f in retained))
+                recommendations["informational"] = list(dict.fromkeys(
+                    f.get("message", "") for f in informational))
+                recommendations["compareWithSource"] = [
+                    "Compare flagged page(s) " + ", ".join(str(p) for p in pages) +
+                    " with the paper source if available."] if pages else []
+                recommendations["rescanning"] = (
+                    ["If source comparison confirms a scanning defect, rescan the affected pages."]
+                    if any(f.get("code") in {"UNREADABLE_PAGE", "POSSIBLE_CUTOFF",
+                      "POSSIBLE_INCOMPLETE_PAGE", "BLURRY_PAGE", "DARK_PAGE",
+                      "LIGHT_PAGE", "ORIENTATION_ISSUE"} for f in retained) else [])
+                analysis["recommendations"] = recommendations
+                with db:
+                    db.execute("UPDATE documents SET qa_status=?,analysis_json=? WHERE id=?",
+                        (qa["status"],json.dumps(analysis),row["id"]))
+                    db.execute("""UPDATE findings SET kind='information'
+                      WHERE document_id=? AND code IN (?,?,?,?)""",
+                      (row["id"], *sorted(NON_MATERIAL_CONTEXT_CODES)))
+                changed += 1
+            except (ValueError, TypeError, AttributeError, KeyError):
+                # Malformed older records remain unchanged for investigation.
+                continue
+    return {"reclassified": changed}
+
 def initialize(db):
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA synchronous=NORMAL")
     db.execute("PRAGMA busy_timeout=5000")
     db.execute("PRAGMA foreign_keys=ON")
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version > 1:
+    if version > 4:
         raise ValueError("Unsupported newer ScanAuditor database version")
     if version == 0:
         db.executescript("""
@@ -132,6 +238,38 @@ def initialize(db):
         PRAGMA user_version=1;
         COMMIT;
         """)
+    if version < 2:
+        reclassify_non_material_findings(db)
+        db.execute("PRAGMA user_version=2")
+    if version < 3:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(documents)")}
+        with db:
+            if "association_status" not in columns:
+                db.execute("ALTER TABLE documents ADD COLUMN association_status TEXT NOT NULL DEFAULT 'not-assessed'")
+            db.execute("CREATE INDEX IF NOT EXISTS ix_docs_association ON documents(project_id,association_status,reviewed_at,id)")
+            db.execute("PRAGMA user_version=3")
+    if version < 4:
+        # Older v3 identity alerts appeared in the attention queue but were
+        # missing from the unified findings index. Backfill locally without
+        # reanalyzing PDFs, touching provider APIs or changing past evidence.
+        with db:
+            last_id = 0
+            while True:
+                previous = db.execute("""SELECT id,analysis_json FROM documents
+                  WHERE id>? AND association_status='needs-review'
+                  ORDER BY id LIMIT 200""", (last_id,)).fetchall()
+                if not previous:
+                    break
+                for record in previous:
+                    last_id = record["id"]
+                    try:
+                        association = json.loads(record["analysis_json"]).get("recordAssociation") or {}
+                        for code, page, kind in extract_association_findings(association):
+                            db.execute("""INSERT INTO findings(document_id,code,page_number,kind)
+                              VALUES (?,?,?,?)""", (record["id"], code, page, kind))
+                    except (ValueError, TypeError, AttributeError):
+                        continue
+            db.execute("PRAGMA user_version=4")
     return True
 
 
@@ -162,8 +300,28 @@ def all_projects(db, a):
     return [row_dict(row) for row in db.execute("""
       SELECT p.id,p.label,p.mode,p.kind,p.updated_at,
       (SELECT count(*) FROM documents d WHERE d.project_id=p.id) document_count,
-      (SELECT count(*) FROM documents d WHERE d.project_id=p.id AND d.qa_status='review-required' AND (d.review_outcome IS NULL OR d.review_outcome='inconclusive')) awaiting_review
+      (SELECT count(*) FROM documents d WHERE d.project_id=p.id AND (d.qa_status IN ('review-required','analysis-failed') OR d.association_status='needs-review') AND (d.review_outcome IS NULL OR d.review_outcome='inconclusive')) awaiting_review
       FROM projects p ORDER BY p.updated_at DESC LIMIT 500""")]
+
+
+def extract_association_findings(association):
+    """Return one unified audit finding per affected page; never store identity values."""
+    result = []
+    if not isinstance(association, dict) or association.get("status") != "needs-review":
+        return result
+    for finding in (association.get("flags") or [])[:1000]:
+        if not isinstance(finding, dict):
+            continue
+        code = finding.get("code")
+        if (not isinstance(code, str) or not code or len(code) > 72
+                or not code.isascii() or not code.replace("_", "").isalnum()
+                or not code[0].isalpha()):
+            continue
+        pages = finding.get("pages")
+        pages = pages if isinstance(pages, list) else []
+        valid_pages = sorted({p for p in pages if type(p) is int and p > 0})
+        result.extend((code, page, "review") for page in (valid_pages[:1000] or [None]))
+    return result[:4000]
 
 
 def extract_findings(analysis):
@@ -183,6 +341,7 @@ def extract_findings(analysis):
                 result.append((code, None, kind))
             else:
                 result.extend((code, p, kind) for p in valid_pages[:2000])
+    result.extend(extract_association_findings(analysis.get("recordAssociation")))
     return result[:5000]
 
 
@@ -207,6 +366,10 @@ def save_document(db, a):
     if not isinstance(evidence, dict):
         raise ValueError("Invalid evidence")
     name = os.path.basename(source)
+    association = analysis.get("recordAssociation") or {}
+    association_status = association.get("status")
+    if association_status not in {"not-configured", "unconfirmed", "uncertain", "matched", "needs-review"}:
+        association_status = "not-assessed"
     stamp = now()
     run_id = a.get("runId") if valid_string(a.get("runId"), 100) else None
     file_key = a.get("fileKey") if valid_string(a.get("fileKey"), 128) else None
@@ -219,12 +382,12 @@ def save_document(db, a):
         preserve_review = bool(previous and file_hash and previous["file_sha256"] == file_hash)
         if previous:
             db.execute("""UPDATE documents SET display_name=?,file_key=?,file_sha256=?,page_count=?,
-              qa_status=?,analyzed_at=?,run_id=?,analysis_json=?,evidence_json=?,revision=?,
+              qa_status=?,association_status=?,analyzed_at=?,run_id=?,analysis_json=?,evidence_json=?,revision=?,
               review_outcome=CASE WHEN ? THEN review_outcome ELSE NULL END,
               comparison_basis=CASE WHEN ? THEN comparison_basis ELSE NULL END,
               reviewed_at=CASE WHEN ? THEN reviewed_at ELSE NULL END,
               reviewer_label=CASE WHEN ? THEN reviewer_label ELSE NULL END
-              WHERE id=?""", (name, file_key, file_hash, page_count, status, stamp, run_id,
+              WHERE id=?""", (name, file_key, file_hash, page_count, status, association_status, stamp, run_id,
                                json.dumps(analysis), json.dumps(evidence), revision,
                                int(preserve_review), int(preserve_review), int(preserve_review),
                                int(preserve_review), previous["id"]))
@@ -233,10 +396,10 @@ def save_document(db, a):
         else:
             cursor = db.execute("""INSERT INTO documents
               (project_id,source_path,display_name,file_key,file_sha256,page_count,qa_status,
-               analyzed_at,run_id,analysis_json,evidence_json,revision)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+               association_status,analyzed_at,run_id,analysis_json,evidence_json,revision)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
               (project_id, source, name, file_key, file_hash, page_count, status,
-               stamp, run_id, json.dumps(analysis), json.dumps(evidence), revision))
+               association_status,stamp, run_id, json.dumps(analysis), json.dumps(evidence), revision))
             document_id = cursor.lastrowid
         db.executemany("INSERT INTO findings(document_id,code,page_number,kind) VALUES (?,?,?,?)",
                        ((document_id, code, page, kind) for code, page, kind in extract_findings(analysis)))
@@ -245,7 +408,9 @@ def save_document(db, a):
           VALUES (?,?,?,?,?,?,?,?)""",
           (document_id,run_id,stamp,status,page_count,file_hash,json.dumps(evidence),revision))
         db.execute("UPDATE projects SET updated_at=? WHERE id=?", (stamp,project_id))
+    overall = "review-required" if status != "passed" or association_status == "needs-review" else "passed"
     return {"id":document_id,"projectId":project_id,"qaStatus":status,
+            "overallAuditStatus": overall, "associationStatus": association_status,
             "pageCount":page_count,"revision":revision}
 
 
@@ -278,7 +443,7 @@ def list_documents(db, a):
         raise ValueError("Choose an audit project")
     status = a.get("status", "all")
     review = a.get("review", "all")
-    if status not in {"all", *STATUSES} or review not in ("all","pending","reviewed"):
+    if status not in {"all", "attention", "association-review", *STATUSES} or review not in ("all","pending","reviewed"):
         raise ValueError("Invalid filter")
     limit = a.get("limit", 50)
     page = a.get("page", 1)
@@ -292,7 +457,11 @@ def list_documents(db, a):
         raise ValueError("Invalid finding code")
     query = "FROM documents d WHERE d.project_id=?"
     params = [project_id]
-    if status != "all":
+    if status == "attention":
+        query += " AND (d.qa_status IN ('analysis-failed','review-required') OR d.association_status='needs-review')"
+    elif status == "association-review":
+        query += " AND d.association_status='needs-review'"
+    elif status != "all":
         query += " AND d.qa_status=?"
         params.append(status)
     if review == "pending":
@@ -309,11 +478,13 @@ def list_documents(db, a):
         params.append(code.strip().upper())
     total = db.execute("SELECT count(*) " + query, params).fetchone()[0]
     rows = db.execute("""SELECT d.id,d.project_id,d.display_name,d.page_count,d.qa_status,
-      d.analyzed_at,d.revision,d.review_outcome,d.comparison_basis,d.reviewed_at,
+      CASE WHEN d.qa_status!='passed' OR d.association_status='needs-review'
+        THEN 'review-required' ELSE 'passed' END overall_audit_status,
+      d.analyzed_at,d.revision,d.association_status,d.review_outcome,d.comparison_basis,d.reviewed_at,
       (SELECT group_concat(DISTINCT f.code) FROM findings f
          WHERE f.document_id=d.id AND f.kind='review') finding_codes,
       (SELECT count(*) FROM corrective_actions a WHERE a.document_id=d.id AND a.status='open') open_actions
-      """ + query + " ORDER BY CASE d.qa_status WHEN 'analysis-failed' THEN 0 WHEN 'review-required' THEN 1 ELSE 2 END, d.id DESC LIMIT ? OFFSET ?",
+      """ + query + " ORDER BY CASE WHEN d.qa_status='analysis-failed' THEN 0 WHEN d.qa_status='review-required' THEN 1 WHEN d.association_status='needs-review' THEN 2 ELSE 3 END, d.id DESC LIMIT ? OFFSET ?",
       [*params, limit, (page-1)*limit])
     return {"total":total,"page":page,"limit":limit,"rows":[row_dict(row) for row in rows]}
 
@@ -342,7 +513,9 @@ def summary(db, a):
       coalesce(sum(qa_status='review-required'),0) review_required,
       coalesce(sum(qa_status='analysis-failed'),0) analysis_failed,
       coalesce(sum(reviewed_at IS NOT NULL),0) reviewed,
-      coalesce(sum(qa_status='review-required' AND (review_outcome IS NULL OR review_outcome='inconclusive')),0) pending_review
+      coalesce(sum(association_status='needs-review'),0) association_review,
+      coalesce(sum(qa_status!='passed' OR association_status='needs-review'),0) overall_review_required,
+      coalesce(sum((qa_status='review-required' OR qa_status='analysis-failed' OR association_status='needs-review') AND (review_outcome IS NULL OR review_outcome='inconclusive')),0) pending_review
       FROM documents WHERE project_id=?""",(pid,)).fetchone())
 
 
@@ -425,9 +598,13 @@ def export_queue(db, a):
     # from renderer-controlled text. Stream rows instead of loading 100k cases.
     with open(destination, "w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["Document","Pages","Automated QA","Finding codes","Manual outcome",
-                         "Review basis","Reviewed at","Open corrective actions"])
-        cursor = db.execute("""SELECT d.display_name,d.page_count,d.qa_status,
+        writer.writerow(["Document","Pages","Overall audit result","Scan quality QA",
+                         "Document preparation / patient identity","Audit finding codes",
+                         "Manual outcome","Review basis","Reviewed at","Open corrective actions"])
+        cursor = db.execute("""SELECT d.display_name,d.page_count,
+          CASE WHEN d.qa_status!='passed' OR d.association_status='needs-review'
+            THEN 'review-required' ELSE 'passed' END,
+          d.qa_status,d.association_status,
           (SELECT group_concat(DISTINCT f.code) FROM findings f
            WHERE f.document_id=d.id AND f.kind='review'),
           d.review_outcome,d.comparison_basis,d.reviewed_at,
@@ -457,7 +634,8 @@ def backup_database(db, a):
 
 
 HANDLERS = {
-    "ping": lambda db,a: {"ready": True, "schema": 1},
+    "ping": lambda db,a: {"ready": True, "schema": 4},
+    "reclassifyPolicy": lambda db,a: reclassify_non_material_findings(db),
     "upsertProject": project,
     "listProjects": all_projects,
     "saveDocument": save_document,

@@ -66,13 +66,14 @@ test('50 percent identifier coverage can pass when remaining pages are resolved 
   assert.equal(analyzer.evaluateQa(text, cleanImages(), cleanMetrics()).status, 'passed');
 });
 
-test('unresolved unidentified page requires review', () => {
+test('unresolved unidentified page is context, not proof of material scanning loss', () => {
   const analyzer = new ScanFidelityAnalyzer();
   const text = analyzer.combinePageAnalyses([page(1, ['John Smith'], ['123456']), page(2)], 2);
   attachLinkage(text, { identifiedPages: [1], unresolvedPages: [2] });
   const qa = analyzer.evaluateQa(text, cleanImages(), cleanMetrics());
-  assert.equal(qa.status, 'review-required');
-  assert.ok(qa.findings.some(item => item.code === 'UNRESOLVED_PAGE'));
+  assert.equal(qa.status, 'passed');
+  assert.ok(qa.informationalFindings.some(item => item.code === 'UNRESOLVED_PAGE'));
+  assert.ok(!qa.findings.some(item => item.code === 'UNRESOLVED_PAGE'));
 });
 
 test('medium-confidence hospital number is informational unless there is separate scan-fidelity evidence', () => {
@@ -143,15 +144,16 @@ test('near duplicate requires both perceptual and OCR similarity', () => {
   assert.deepEqual(analyzer.findPossibleDuplicateGroups(metrics, contexts, []), [[1, 2]]);
 });
 
-test('exact duplicate finding requires review', () => {
+test('exact digital duplicate without demonstrated page loss is informational', () => {
   const analyzer = new ScanFidelityAnalyzer();
   const text = analyzer.combinePageAnalyses([page(1, ['John Smith'], ['123456']), page(2, ['John Smith'], ['123456'])], 2);
   attachLinkage(text, { identifiedPages: [1, 2] });
   const images = cleanImages();
   images.exactDuplicateGroups = [[1, 2]];
   const qa = analyzer.evaluateQa(text, images, cleanMetrics());
-  assert.equal(qa.status, 'review-required');
-  assert.ok(qa.findings.some(item => item.code === 'EXACT_DUPLICATE'));
+  assert.equal(qa.status, 'passed');
+  assert.ok(qa.informationalFindings.some(item => item.code === 'EXACT_DUPLICATE'));
+  assert.ok(!qa.findings.some(item => item.code === 'EXACT_DUPLICATE'));
 });
 
 test('all OCR failures produce analysis-failed', () => {
