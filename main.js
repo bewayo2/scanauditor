@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
@@ -16,6 +16,7 @@ const { appendAuditRecord } = require('./audit_logger');
 const reviewDispositions = require('./review_dispositions');
 const { evidenceReport } = require('./evidence_report');
 const { runBulkAudit, inspectBulkFolder } = require('./bulk_audit');
+const { AuditStore } = require('./audit_store');
 
 let mainWindow;
 // In-memory only. Never save or log the hospital's API key.
@@ -26,6 +27,13 @@ let activeBulkPreview = null;
 let bulkInventory = null;
 let activeAnalysis = false;
 let costResetPending = false;
+let workspaceStore = null;
+async function getWorkspace() {
+  if (!workspaceStore) workspaceStore = new AuditStore(app.getPath('userData'));
+  await workspaceStore.start();
+  return workspaceStore;
+}
+
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -202,6 +210,8 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('before-quit', () => { workspaceStore?.close().catch(() => {}); });
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
@@ -230,11 +240,52 @@ ipcMain.handle('select-files', async () => {
 });
 
 ipcMain.handle('get-backend-status', getOllamaStatus);
-ipcMain.handle('get-review-disposition', (_event, fileSha256) =>
-  reviewDispositions.getDisposition(app.getPath('userData'), fileSha256));
-ipcMain.handle('save-review-disposition', (_event, payload) =>
-  reviewDispositions.saveDisposition(app.getPath('userData'), payload));
+ipcMain.handle('get-review-disposition', async (_event, fileSha256, documentId = null) => {
+  if (Number.isSafeInteger(documentId) && documentId > 0) {
+    const record = await (await getWorkspace()).getDocument(documentId);
+    if (!record || !record.review_outcome) return null;
+    return { outcome: record.review_outcome, comparisonBasis: record.comparison_basis,
+      timestamp: record.reviewed_at };
+  }
+  return reviewDispositions.getDisposition(app.getPath('userData'), fileSha256);
+});
+ipcMain.handle('save-review-disposition', async (_event, payload) => {
+  if (Number.isSafeInteger(payload?.documentId) && payload.documentId > 0) {
+    return (await getWorkspace()).reviewDocument(payload.documentId, payload.outcome,
+      payload.reviewerLabel || '');
+  }
+  return reviewDispositions.saveDisposition(app.getPath('userData'), payload);
+});
 
+// All workspace database access remains in the Electron main process. The
+// renderer receives only a paginated case list and selected record details.
+ipcMain.handle('audit-list-projects', async () => (await getWorkspace()).listProjects());
+ipcMain.handle('audit-list-documents', async (_event, args) =>
+  (await getWorkspace()).listDocuments(args || {}));
+ipcMain.handle('audit-summary', async (_event, projectId) =>
+  (await getWorkspace()).summary(projectId));
+ipcMain.handle('audit-get-document', async (_event, documentId) =>
+  (await getWorkspace()).getDocument(documentId));
+ipcMain.handle('audit-review-document', async (_event, args) =>
+  (await getWorkspace()).reviewDocument(args?.documentId, args?.outcome,
+    args?.reviewerLabel || ''));
+ipcMain.handle('audit-create-action', async (_event, args) =>
+  (await getWorkspace()).createAction(args?.documentId, args?.kind));
+ipcMain.handle('audit-update-action', async (_event, args) =>
+  (await getWorkspace()).updateAction(args?.actionId, args?.status));
+ipcMain.handle('audit-open-pdf', async (_event, documentId) => {
+  const record = await (await getWorkspace()).getDocument(documentId);
+  if (!record) throw new Error('Audit record not found');
+  const original = await fs.realpath(record.source_path);
+  if (path.extname(original).toLowerCase() !== '.pdf' || !(await fs.stat(original)).isFile()) {
+    throw new Error('Original PDF unavailable');
+  }
+  // Open with the hospital workstation's registered PDF app, never an
+  // external URL. The filesystem path comes only from indexed scan results.
+  const error = await shell.openPath(original);
+  if (error) throw new Error('The original PDF could not be opened');
+  return { opened: true };
+});
 ipcMain.handle('set-openai-key', (_event, value) => {
   if (typeof value !== 'string' || value.trim().length < 10 || value.length > 300) {
     throw new Error('Enter a valid OpenAI API key.');
@@ -292,6 +343,9 @@ ipcMain.handle('analyze-files', async (_event, request) => {
   }
   activeAnalysis = true;
   try {
+  const workspace = await getWorkspace();
+  const individualProject = await workspace.upsertProject(
+    path.join(app.getPath('userData'), 'individual-audits'), mode, 'individual');
   const runId = crypto.randomUUID();
   const analyzer = mode === 'local'
     ? new ConfiguredAnalyzer()
@@ -315,6 +369,11 @@ ipcMain.handle('analyze-files', async (_event, request) => {
     } catch (error) {
       console.error('[ScanAuditor] analysis_failed', { message: error.message });
       result = failureResult(requestedPath, error);
+    }
+    // Individual and folder results use the same indexed case record format.
+    if (typeof requestedPath === 'string' && path.extname(requestedPath).toLowerCase() === '.pdf') {
+      const saved = await workspace.saveDocument(individualProject.id, requestedPath, result, runId);
+      if (result?.analysis) result.analysis.workspaceDocumentId = saved.id;
     }
     results.push(result);
     await writeAuditRecord(result);
@@ -398,6 +457,7 @@ ipcMain.handle('run-bulk-audit', async (_event, request) => {
         ? request.maxUsd : 5,
       cancellation,
       inventory: bulkInventory,
+      store: await getWorkspace(),
       onProgress: progress => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('bulk-progress', progress);
