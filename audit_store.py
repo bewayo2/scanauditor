@@ -6,6 +6,7 @@ library already available to ScanAuditor's image converter; no native Electron
 Node addon or external database server. NEVER print patient data or paths to
 stderr/stdout (except the structured response on the private IPC pipe).
 """
+import csv
 import datetime
 import json
 import os
@@ -122,6 +123,12 @@ def initialize(db):
           revision INTEGER NOT NULL
         );
         CREATE INDEX ix_actions_doc ON corrective_actions(document_id, status);
+        CREATE TABLE action_events (
+          id INTEGER PRIMARY KEY,
+          action_id INTEGER NOT NULL REFERENCES corrective_actions(id),
+          status TEXT NOT NULL, timestamp TEXT NOT NULL
+        );
+        CREATE INDEX ix_action_events_action ON action_events(action_id,id);
         PRAGMA user_version=1;
         COMMIT;
         """)
@@ -258,6 +265,10 @@ def get_document(db, a):
     item["actions"] = [row_dict(row) for row in db.execute(
         "SELECT id,kind,status,created_at,closed_at,reviewer_label,revision FROM corrective_actions WHERE document_id=? ORDER BY id DESC",
         (document_id,))]
+    item["actionHistory"] = [row_dict(row) for row in db.execute("""
+        SELECT a.kind,e.status,e.timestamp FROM action_events e
+        JOIN corrective_actions a ON a.id=e.action_id
+        WHERE a.document_id=? ORDER BY e.id DESC LIMIT 100""", (document_id,))]
     return item
 
 
@@ -349,9 +360,12 @@ def create_action(db, a):
     row = db.execute("SELECT revision FROM documents WHERE id=?", (doc,)).fetchone()
     if not row:
         raise ValueError("Document not found")
+    stamp = now()
     with db:
         cursor = db.execute("""INSERT INTO corrective_actions(document_id,kind,status,created_at,revision)
-          VALUES (?,?,'open',?,?)""",(doc,kind,now(),row["revision"]))
+          VALUES (?,?,'open',?,?)""",(doc,kind,stamp,row["revision"]))
+        db.execute("INSERT INTO action_events(action_id,status,timestamp) VALUES (?,'open',?)",
+                   (cursor.lastrowid,stamp))
     return {"id":cursor.lastrowid,"kind":kind,"status":"open"}
 
 
@@ -359,12 +373,66 @@ def update_action(db, a):
     action_id, status = a.get("actionId"), a.get("status")
     if not valid_id(action_id) or status not in ACTION_STATUSES:
         raise ValueError("Invalid action update")
+    stamp = now()
     with db:
         cursor = db.execute("UPDATE corrective_actions SET status=?,closed_at=? WHERE id=?",
-             (status,now() if status != "open" else None,action_id))
-    if not cursor.rowcount:
-        raise ValueError("Action not found")
+             (status,stamp if status != "open" else None,action_id))
+        if not cursor.rowcount:
+            raise ValueError("Action not found")
+        db.execute("INSERT INTO action_events(action_id,status,timestamp) VALUES (?,?,?)",
+                   (action_id,status,stamp))
     return {"id":action_id,"status":status}
+
+
+def safe_csv_cell(value):
+    text = str(value if value is not None else "")
+    # Spreadsheet formula injection protection on exported, potentially
+    # patient-identifying filenames.
+    if text.lstrip().startswith(("=", "+", "-", "@", "\t", "\r", "\n")):
+        return "'" + text
+    return text
+
+
+def export_queue(db, a):
+    pid, destination = a.get("projectId"), a.get("destination")
+    if not valid_string(pid,90) or not valid_string(destination,4096):
+        raise ValueError("Invalid export request")
+    if not db.execute("SELECT 1 FROM projects WHERE id=?", (pid,)).fetchone():
+        raise ValueError("Unknown audit project")
+    count = 0
+    # The output path must be chosen by Electron's Save dialog, never directly
+    # from renderer-controlled text. Stream rows instead of loading 100k cases.
+    with open(destination, "w", newline="", encoding="utf-8-sig") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["Document","Pages","Automated QA","Finding codes","Manual outcome",
+                         "Review basis","Reviewed at","Open corrective actions"])
+        cursor = db.execute("""SELECT d.display_name,d.page_count,d.qa_status,
+          (SELECT group_concat(DISTINCT f.code) FROM findings f
+           WHERE f.document_id=d.id AND f.kind='review'),
+          d.review_outcome,d.comparison_basis,d.reviewed_at,
+          (SELECT count(*) FROM corrective_actions ac WHERE ac.document_id=d.id AND ac.status='open')
+          FROM documents d WHERE d.project_id=? ORDER BY d.id""", (pid,))
+        while True:
+            chunk = cursor.fetchmany(500)
+            if not chunk:
+                break
+            for row in chunk:
+                writer.writerow([safe_csv_cell(cell) for cell in row])
+                count += 1
+    return {"rows":count}
+
+
+def backup_database(db, a):
+    destination = a.get("destination")
+    if not valid_string(destination,4096):
+        raise ValueError("Invalid backup destination")
+    # SQLite's backup API obtains a consistent snapshot with WAL mode enabled.
+    backup = sqlite3.connect(destination)
+    try:
+        db.backup(backup)
+    finally:
+        backup.close()
+    return {"saved":True}
 
 
 HANDLERS = {
@@ -378,6 +446,8 @@ HANDLERS = {
     "reviewDocument": review_document,
     "createAction": create_action,
     "updateAction": update_action,
+    "exportQueue": export_queue,
+    "backupDatabase": backup_database,
 }
 
 
@@ -385,6 +455,8 @@ def main():
     if len(sys.argv) != 2:
         raise ValueError("Database path is required")
     db_path = os.path.abspath(sys.argv[1])
+    if hasattr(os, 'umask'):
+        os.umask(0o077)  # Protect SQLite, WAL and SHM files on Unix.
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     db = sqlite3.connect(db_path, timeout=5)
     db.row_factory = sqlite3.Row
