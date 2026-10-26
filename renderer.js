@@ -840,6 +840,14 @@ function renderAuditHistory(record) {
     }
     box.appendChild(list);
   }
+  if (record.actionHistory?.length) {
+    box.appendChild(el('h4', '', 'Corrective Action History'));
+    const events = document.createElement('ul');
+    for (const event of record.actionHistory) {
+      events.appendChild(el('li', '', event.timestamp + ' · ' + event.kind + ' · ' + event.status));
+    }
+    box.appendChild(events);
+  }
   box.appendChild(el('h4', '', 'Corrective Actions'));
   const actions = byId('audit-record-actions');
   actions.replaceChildren();
@@ -1155,6 +1163,27 @@ byId('audit-next').addEventListener('click', () => {
 byId('audit-previous').addEventListener('click', () => {
   auditQueueState.page = Math.max(1, auditQueueState.page - 1);
   refreshAuditQueue().catch(() => {});
+});
+byId('audit-export-summary').addEventListener('click', async () => {
+  const projectId = byId('audit-project').value;
+  if (!projectId) return;
+  try {
+    const result = await window.electronAPI.auditExportSummary(projectId);
+    if (!result.canceled) showNotification('Exported ' + queueFormat(result.rows) + ' indexed records.', 'success');
+  } catch (_) { showNotification('Could not export the audit project.', 'error'); }
+});
+byId('audit-backup').addEventListener('click', async () => {
+  try {
+    const result = await window.electronAPI.auditBackupDatabase();
+    if (!result.canceled) showNotification('Private SQLite audit backup saved to the selected location.', 'success');
+  } catch (_) { showNotification('Could not back up the audit database.', 'error'); }
+});
+byId('audit-export-evidence').addEventListener('click', async () => {
+  if (!auditQueueState.detailId) return;
+  try {
+    const result = await window.electronAPI.auditExportEvidence(auditQueueState.detailId);
+    if (result.saved) showNotification('QA evidence exported for the selected record.', 'success');
+  } catch (_) { showNotification('Could not export the selected record.', 'error'); }
 });
 byId('audit-close-detail').addEventListener('click', () => {
   byId('audit-record-detail').hidden = true;
