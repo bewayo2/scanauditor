@@ -16,7 +16,8 @@ const MODIFIERS = Object.freeze({ maxDepth: 40 });
 
 function jobDirectory(userData, root, mode) {
   // No directory names, patient names or source file paths in journal.
-  const key = crypto.createHash('sha256').update(path.resolve(root) + '\0' + mode).digest('hex');
+  // New SQLite-backed workspace starts fresh; legacy test checkpoints are not imported.
+  const key = crypto.createHash('sha256').update(path.resolve(root) + '\0' + mode + '\0sqlite-v1').digest('hex');
   return path.join(userData, 'bulk-audit', key);
 }
 function makeFileKey(secret, rel, stat) {
