@@ -28,7 +28,8 @@ test('queue uses server pagination, filters, a single-case viewer and manual act
   for (const id of ['audit-project','audit-status-filter','audit-review-filter','audit-finding',
     'audit-search','audit-next','audit-previous','audit-queue-rows',
     'audit-record-detail','audit-open-pdf','audit-reanalyze','audit-rescan-task',
-    'audit-paper-task','audit-export-summary','audit-export-evidence','audit-backup']) {
+    'audit-paper-task','audit-export-summary','audit-export-evidence',
+    'audit-export-record-excel','audit-backup']) {
     assert.ok(html.includes('id="' + id + '"'), id);
   }
   assert.match(renderer, /limit: 50/);
@@ -52,6 +53,9 @@ test('bulk and individual results both persist into the same SQLite case store',
 test('privacy warnings and backup/export confirmations are not bypassed', () => {
   assert.match(main, /message: 'Export filenames and review results\?'/);
   assert.match(main, /message: 'Create a sensitive audit database backup\?'/);
+  assert.match(main, /ipcMain\.handle\('audit-export-record-excel'/);
+  assert.match(main, /message: 'Export detailed record findings\?'/);
+  assert.match(preload, /auditExportRecordExcel/);
   assert.match(main, /dialog\.showMessageBox/);
   assert.match(html, /may include filenames, detailed scan findings and patient identifiers/);
   assert.match(html, /Audit Projects &amp; Review Queue/);
