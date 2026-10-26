@@ -128,3 +128,44 @@ test('project summaries and queue filters never leak detailed source path or OCR
   assert.equal(full.source_path, source);
   assert.equal(full.evidence.inputSha256, initialHash);
 });
+
+
+test('SQLite backup is complete and summary CSV streams records with spreadsheet-injection protection', async t => {
+  const { dir, store, project, root } = await setup(t);
+  const risky = path.join(root, '=TEST_FORMULA(1).pdf');
+  const saved = await store.saveDocument(project.id, risky,
+    analysis('=TEST_FORMULA(1).pdf', 'review-required'));
+  await store.reviewDocument(saved.id, 'inconclusive', 'Test reviewer');
+  const csv = path.join(dir, 'summary.csv');
+  const exported = await store.exportQueue(project.id, csv);
+  assert.equal(exported.rows, 1);
+  const text = await fs.readFile(csv, 'utf8');
+  assert.match(text, /Document,Pages,Automated QA/);
+  assert.ok(text.includes("'=TEST_FORMULA(1).pdf"));
+  assert.ok(text.includes('inconclusive'));
+  const backupPath = path.join(dir, 'secure-backup.sqlite3');
+  assert.deepEqual(await store.backupDatabase(backupPath), { saved: true });
+  await store.close();
+
+  // Verify the backup is a valid independently openable database snapshot.
+  const backupDir = path.join(dir, 'restored', 'audit-workspace');
+  await fs.ensureDir(backupDir);
+  await fs.copy(backupPath, path.join(backupDir, 'workspace.sqlite3'));
+  const restored = new AuditStore(path.join(dir, 'restored'));
+  t.after(async () => restored.close());
+  const loaded = await restored.getDocument(saved.id);
+  assert.equal(loaded.review_outcome, 'inconclusive');
+  assert.equal(loaded.analysis.qaAssessment.status, 'review-required');
+});
+
+test('corrective-action status changes create append-only history without losing previous transitions', async t => {
+  const { store, project, root } = await setup(t);
+  const saved = await store.saveDocument(project.id, path.join(root, 'test.pdf'),
+    analysis('test.pdf', 'review-required'));
+  const action = await store.createAction(saved.id, 'paper-comparison');
+  await store.updateAction(action.id, 'completed');
+  await store.updateAction(action.id, 'open');
+  const doc = await store.getDocument(saved.id);
+  assert.deepEqual(doc.actionHistory.map(x => x.status), ['open', 'completed', 'open']);
+  assert.equal(doc.actions[0].status, 'open');
+});
