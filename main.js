@@ -270,9 +270,9 @@ ipcMain.handle('audit-review-document', async (_event, args) =>
   (await getWorkspace()).reviewDocument(args?.documentId, args?.outcome,
     args?.reviewerLabel || ''));
 ipcMain.handle('audit-create-action', async (_event, args) =>
-  (await getWorkspace()).createAction(args?.documentId, args?.kind));
+  (await getWorkspace()).createAction(args?.documentId, args?.kind, args?.reviewerLabel || ''));
 ipcMain.handle('audit-update-action', async (_event, args) =>
-  (await getWorkspace()).updateAction(args?.actionId, args?.status));
+  (await getWorkspace()).updateAction(args?.actionId, args?.status, args?.reviewerLabel || ''));
 ipcMain.handle('audit-reanalyze-document', async (_event, request) => {
   if (activeBulk || activeAnalysis || activeBulkPreview || costResetPending) {
     throw new Error('Stop other scan activity before reanalyzing.');
