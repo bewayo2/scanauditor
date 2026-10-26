@@ -1185,6 +1185,13 @@ byId('audit-backup').addEventListener('click', async () => {
     if (!result.canceled) showNotification('Private SQLite audit backup saved to the selected location.', 'success');
   } catch (_) { showNotification('Could not back up the audit database.', 'error'); }
 });
+byId('audit-export-record-excel').addEventListener('click', async () => {
+  if (!auditQueueState.detailId) return;
+  try {
+    const result = await window.electronAPI.auditExportRecordExcel(auditQueueState.detailId);
+    if (result.saved) showNotification('Detailed case review exported to Excel.', 'success');
+  } catch (_) { showNotification('Could not export detailed record.', 'error'); }
+});
 byId('audit-export-evidence').addEventListener('click', async () => {
   if (!auditQueueState.detailId) return;
   try {
