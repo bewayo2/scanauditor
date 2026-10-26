@@ -46,6 +46,132 @@
         </div>
       </section>
 
+      <section class="file-section" aria-labelledby="bulk-heading">
+        <div class="section-header">
+          <h2 id="bulk-heading">Resumable Folder Audit</h2>
+          <p>Process a folder tree one PDF at a time. Results and checkpoints are kept locally without storing patient names, OCR text, or source filenames. Re-select the same folder and mode to resume.</p>
+        </div>
+        <div class="file-actions">
+          <button id="bulk-folder" class="btn btn-secondary" type="button">Select PDF Folder</button>
+          <button id="bulk-start" class="btn btn-success" type="button" disabled>Start / Resume Folder Audit</button>
+          <button id="bulk-stop" class="btn btn-secondary" type="button" disabled>Stop After Current File</button>
+          <button id="bulk-review-queue" class="btn btn-primary" type="button">View Review Queue</button>
+        </div>
+        <div class="bulk-path-display">
+          <strong>Selected folder</strong>
+          <code id="bulk-folder-label">No folder selected.</code>
+          <p class="small-note">The folder path is shown only in this local window; it is not saved in the batch checkpoint or sent to a cloud model.</p>
+        </div>
+        <div class="bulk-monitor" role="status" aria-label="Folder scan status" aria-live="polite" aria-atomic="true">
+          <div class="bulk-monitor-header">
+            <strong id="bulk-phase">Select a folder to begin</strong>
+            <span id="bulk-progress-percentage">Not started</span>
+          </div>
+          <progress id="bulk-progress-bar" max="100" value="0" aria-label="Current batch progress"></progress>
+          <p id="bulk-current" class="small-note">Selecting a folder starts an inventory of PDFs and a sample-based page estimate, before any record is analyzed.</p>
+        </div>
+        <div class="cost-planning">
+          <div><label for="bulk-max-files">Maximum new files this session</label><input id="bulk-max-files" type="number" min="1" max="1000000" step="1" value="100" /></div>
+          <div><label for="bulk-max-usd">Maximum metered API spending (USD; cloud mode)</label><input id="bulk-max-usd" type="number" min="0.01" max="100000" step="0.01" value="5" /></div>
+        </div>
+        <label class="approval-line"><input id="bulk-retry-failed" type="checkbox" /> Retry analysis failures previously recorded in this job</label>
+        <div class="cost-cards">
+          <div class="cost-card"><span>PDF files found</span><strong id="bulk-files-total">—</strong></div>
+          <div class="cost-card"><span>Anticipated pages in folder</span><strong id="bulk-pages-expected">—</strong></div>
+          <div class="cost-card"><span>Pages actually processed this session</span><strong id="bulk-pages-done">0</strong></div>
+          <div class="cost-card"><span>PDFs checked this session</span><strong id="bulk-processed">0</strong></div>
+          <div class="cost-card"><span>Already in checkpoint</span><strong id="bulk-skipped">0</strong></div>
+          <div class="cost-card"><span>Review required</span><strong id="bulk-review">0</strong></div>
+          <div class="cost-card"><span>Analysis failed</span><strong id="bulk-failed">0</strong></div>
+        </div>
+        <p id="bulk-estimate-note" class="small-note">Anticipated pages are estimated from PDF page metadata, not the number of PDF files. Inventory and sampling are read-only. Unreadable files or unusual sample sizes can affect the estimate.</p>
+        <p id="bulk-progress-note" class="small-note">Cloud mode requires explicit hospital approval and a session API key. Progress and page totals count the current session; previous completed PDFs stay in the checkpoint.</p>
+      </section>
+
+      <section class="file-section audit-workspace" id="audit-workspace" aria-labelledby="workspace-heading">
+        <div class="section-header">
+          <h2 id="workspace-heading">Audit Projects &amp; Review Queue</h2>
+          <p>All folder and individual scans are indexed here. Open only the cases needing attention, view the original PDF, record manual decisions, and manage rescans or paper comparison.</p>
+        </div>
+        <div class="audit-queue-toolbar">
+          <div><label for="audit-project">Audit project</label><select id="audit-project"><option value="">Loading projects…</option></select></div>
+          <div><label for="audit-status-filter">Automated QA</label><select id="audit-status-filter">
+            <option value="all">All statuses</option><option value="review-required" selected>Review required</option>
+            <option value="analysis-failed">Analysis failed</option><option value="passed">Passed (sample review)</option>
+          </select></div>
+          <div><label for="audit-review-filter">Human review</label><select id="audit-review-filter">
+            <option value="all">All</option><option value="pending" selected>Awaiting review</option>
+            <option value="reviewed">Reviewed</option></select></div>
+          <div><label for="audit-search">Search local filenames</label>
+            <input id="audit-search" maxlength="160" placeholder="Filename contains…" /></div>
+          <div><label for="audit-finding">Finding code</label>
+            <input id="audit-finding" maxlength="72" placeholder="e.g. CUTOFF_PAGE" /></div>
+          <button id="audit-search-button" class="btn btn-secondary" type="button">Filter Results</button>
+          <button id="audit-refresh" class="btn btn-secondary" type="button">Refresh</button>
+        </div>
+        <div class="audit-queue-summary" role="status" aria-live="polite">
+          <strong id="audit-case-total">No project selected</strong>
+          <span id="audit-queue-stats">Results load in small pages, even for 100,000+ documents.</span>
+        </div>
+        <div class="audit-queue-table-wrap">
+          <table class="audit-queue-table" aria-label="Audited document review queue">
+            <thead><tr><th scope="col">Record</th><th scope="col">Pages</th><th scope="col">Automated result</th>
+              <th scope="col">Key findings</th><th scope="col">Manual review</th><th scope="col">Open actions</th>
+              <th scope="col">Review</th></tr></thead>
+            <tbody id="audit-queue-rows"><tr><td colspan="7">Select an audit project to view records.</td></tr></tbody>
+          </table>
+        </div>
+        <div class="audit-queue-pagination">
+          <button id="audit-previous" class="btn btn-secondary" type="button" disabled>Previous</button>
+          <span id="audit-page-label">Page 1</span>
+          <button id="audit-next" class="btn btn-secondary" type="button" disabled>Next</button>
+        </div>
+        <section id="audit-record-detail" class="audit-record-detail" aria-labelledby="audit-detail-heading" hidden>
+          <div class="audit-detail-header">
+            <h3 id="audit-detail-heading">Record Review</h3>
+            <button id="audit-close-detail" type="button" class="btn btn-secondary">Back to Review Queue</button>
+          </div>
+          <div class="audit-detail-actions">
+            <button id="audit-open-pdf" class="btn btn-secondary" type="button">Open Original PDF</button>
+            <button id="audit-reanalyze" class="btn btn-secondary" type="button">Reanalyze This Record</button>
+            <button id="audit-rescan-task" class="btn btn-secondary" type="button">Request Rescan</button>
+            <button id="audit-paper-task" class="btn btn-secondary" type="button">Request Paper Comparison</button>
+          </div>
+          <p class="small-note">The original PDF opens in the workstation's PDF viewer. Automated QA findings remain separate from human decisions. Do not mark a paper comparison unless the original paper was actually inspected.</p>
+          <div id="audit-record-actions"></div>
+          <div id="audit-record-history"></div>
+          <div id="audit-record-content"></div>
+        </section>
+        <p class="small-note">Local SQLite review data may include filenames, detailed scan findings and patient identifiers. Keep the workstation, disk backups and userData access under hospital security controls. This is not a multi-user access-control system.</p>
+      </section>
+
+      <details class="audit-individual-tools"><summary>Audit an individual PDF (uses the same Review Queue)</summary>
+      <section class="file-section">
+        <div class="section-header">
+          <h2>File Selection</h2>
+          <p>Select PDF medical records to audit for scan fidelity. Files are processed locally in place and are not copied into an uploads folder.</p>
+        </div>
+
+        <div class="file-upload-area" id="file-upload-area">
+          <div class="upload-content">
+            <h3>Select PDF Files</h3>
+            <p>Click Browse Files or drag and drop PDFs here.</p>
+            <button class="btn btn-primary" id="select-files-btn" type="button">Browse Files</button>
+          </div>
+        </div>
+
+        <div class="selected-files" id="selected-files">
+          <h3>Selected Files</h3>
+          <div class="file-list" id="file-list"></div>
+          <div class="file-actions">
+            <button class="btn btn-secondary" id="clear-files-btn" type="button">Clear All</button>
+            <button class="btn btn-success" id="analyze-files-btn" type="button">Analyze Files</button>
+          </div>
+        </div>
+      </section>
+
+      </details>
+
       <section class="cost-section" aria-labelledby="cost-heading">
         <div class="section-header">
           <h2 id="cost-heading">Estimate Scanning Cost</h2>
@@ -103,71 +229,6 @@
             </details>
           </div>
         </details>
-      </section>
-
-      <section class="file-section">
-        <div class="section-header">
-          <h2>File Selection</h2>
-          <p>Select PDF medical records to audit for scan fidelity. Files are processed locally in place and are not copied into an uploads folder.</p>
-        </div>
-
-        <div class="file-upload-area" id="file-upload-area">
-          <div class="upload-content">
-            <h3>Select PDF Files</h3>
-            <p>Click Browse Files or drag and drop PDFs here.</p>
-            <button class="btn btn-primary" id="select-files-btn" type="button">Browse Files</button>
-          </div>
-        </div>
-
-        <div class="selected-files" id="selected-files">
-          <h3>Selected Files</h3>
-          <div class="file-list" id="file-list"></div>
-          <div class="file-actions">
-            <button class="btn btn-secondary" id="clear-files-btn" type="button">Clear All</button>
-            <button class="btn btn-success" id="analyze-files-btn" type="button">Analyze Files</button>
-          </div>
-        </div>
-      </section>
-
-      <section class="file-section" aria-labelledby="bulk-heading">
-        <div class="section-header">
-          <h2 id="bulk-heading">Resumable Folder Audit</h2>
-          <p>Process a folder tree one PDF at a time. Results and checkpoints are kept locally without storing patient names, OCR text, or source filenames. Re-select the same folder and mode to resume.</p>
-        </div>
-        <div class="file-actions">
-          <button id="bulk-folder" class="btn btn-secondary" type="button">Select PDF Folder</button>
-          <button id="bulk-start" class="btn btn-success" type="button" disabled>Start / Resume Folder Audit</button>
-          <button id="bulk-stop" class="btn btn-secondary" type="button" disabled>Stop After Current File</button>
-        </div>
-        <div class="bulk-path-display">
-          <strong>Selected folder</strong>
-          <code id="bulk-folder-label">No folder selected.</code>
-          <p class="small-note">The folder path is shown only in this local window; it is not saved in the batch checkpoint or sent to a cloud model.</p>
-        </div>
-        <div class="bulk-monitor" role="status" aria-label="Folder scan status" aria-live="polite" aria-atomic="true">
-          <div class="bulk-monitor-header">
-            <strong id="bulk-phase">Select a folder to begin</strong>
-            <span id="bulk-progress-percentage">Not started</span>
-          </div>
-          <progress id="bulk-progress-bar" max="100" value="0" aria-label="Current batch progress"></progress>
-          <p id="bulk-current" class="small-note">Selecting a folder starts an inventory of PDFs and a sample-based page estimate, before any record is analyzed.</p>
-        </div>
-        <div class="cost-planning">
-          <div><label for="bulk-max-files">Maximum new files this session</label><input id="bulk-max-files" type="number" min="1" max="1000000" step="1" value="100" /></div>
-          <div><label for="bulk-max-usd">Maximum metered API spending (USD; cloud mode)</label><input id="bulk-max-usd" type="number" min="0.01" max="100000" step="0.01" value="5" /></div>
-        </div>
-        <label class="approval-line"><input id="bulk-retry-failed" type="checkbox" /> Retry analysis failures previously recorded in this job</label>
-        <div class="cost-cards">
-          <div class="cost-card"><span>PDF files found</span><strong id="bulk-files-total">—</strong></div>
-          <div class="cost-card"><span>Anticipated pages in folder</span><strong id="bulk-pages-expected">—</strong></div>
-          <div class="cost-card"><span>Pages actually processed this session</span><strong id="bulk-pages-done">0</strong></div>
-          <div class="cost-card"><span>PDFs checked this session</span><strong id="bulk-processed">0</strong></div>
-          <div class="cost-card"><span>Already in checkpoint</span><strong id="bulk-skipped">0</strong></div>
-          <div class="cost-card"><span>Review required</span><strong id="bulk-review">0</strong></div>
-          <div class="cost-card"><span>Analysis failed</span><strong id="bulk-failed">0</strong></div>
-        </div>
-        <p id="bulk-estimate-note" class="small-note">Anticipated pages are estimated from PDF page metadata, not the number of PDF files. Inventory and sampling are read-only. Unreadable files or unusual sample sizes can affect the estimate.</p>
-        <p id="bulk-progress-note" class="small-note">Cloud mode requires explicit hospital approval and a session API key. Progress and page totals count the current session; previous completed PDFs stay in the checkpoint.</p>
       </section>
 
       <section class="results-section" id="results-section">
