@@ -53,6 +53,6 @@ test('privacy warnings and backup/export confirmations are not bypassed', () => 
   assert.match(main, /message: 'Export filenames and review results\?'/);
   assert.match(main, /message: 'Create a sensitive audit database backup\?'/);
   assert.match(main, /dialog\.showMessageBox/);
-  assert.match(html, /contains local source paths, filenames/);
+  assert.match(html, /may include filenames, detailed scan findings and patient identifiers/);
   assert.match(renderer, /Review Queue/);
 });
