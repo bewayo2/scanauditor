@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resetCostHistory: () => ipcRenderer.invoke('reset-cost-history'),
   auditListProjects: () => ipcRenderer.invoke('audit-list-projects'),
   auditListDocuments: filters => ipcRenderer.invoke('audit-list-documents', filters),
+  auditListFindingTypes: projectId => ipcRenderer.invoke('audit-list-finding-types', projectId),
   auditSummary: projectId => ipcRenderer.invoke('audit-summary', projectId),
   auditGetDocument: id => ipcRenderer.invoke('audit-get-document', id),
   auditReviewDocument: request => ipcRenderer.invoke('audit-review-document', request),
