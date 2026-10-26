@@ -352,6 +352,31 @@ ipcMain.handle('audit-backup-database', async () => {
   if (chosen.canceled || !chosen.filePath) return { canceled: true };
   return (await getWorkspace()).backupDatabase(chosen.filePath);
 });
+ipcMain.handle('audit-export-record-excel', async (_event, documentId) => {
+  const record = await (await getWorkspace()).getDocument(documentId);
+  if (!record) throw new Error('Audit record not found');
+  const confirmation = await dialog.showMessageBox(mainWindow, {
+    type: 'warning', buttons: ['Cancel', 'Export Detailed Excel'],
+    defaultId: 0, cancelId: 0, noLink: true,
+    message: 'Export detailed record findings?',
+    detail: 'The Excel report may contain patient names, hospital numbers and clinical context. Save it only to hospital-approved secure storage.'
+  });
+  if (confirmation.response !== 1) return { canceled: true };
+  const chosen = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export detailed scan QA report',
+    defaultPath: 'ScanAuditor_Record_Review.xlsx',
+    filters: [{ name: 'Excel Files', extensions: ['xlsx'] }]
+  });
+  if (chosen.canceled || !chosen.filePath) return { canceled: true };
+  if (record.review_outcome) {
+    record.analysis.manualDisposition = {
+      outcome: record.review_outcome, comparisonBasis: record.comparison_basis
+    };
+  }
+  const workbook = exportToExcel([{ analysis: record.analysis }]);
+  XLSX.writeFile(workbook, chosen.filePath);
+  return { saved: true };
+});
 ipcMain.handle('audit-export-evidence', async (_event, documentId) => {
   const record = await (await getWorkspace()).getDocument(documentId);
   if (!record) throw new Error('Audit record not found');
