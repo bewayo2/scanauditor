@@ -126,7 +126,7 @@ def initialize(db):
         CREATE TABLE action_events (
           id INTEGER PRIMARY KEY,
           action_id INTEGER NOT NULL REFERENCES corrective_actions(id),
-          status TEXT NOT NULL, timestamp TEXT NOT NULL
+          status TEXT NOT NULL, timestamp TEXT NOT NULL, reviewer_label TEXT
         );
         CREATE INDEX ix_action_events_action ON action_events(action_id,id);
         PRAGMA user_version=1;
@@ -162,7 +162,7 @@ def all_projects(db, a):
     return [row_dict(row) for row in db.execute("""
       SELECT p.id,p.label,p.mode,p.kind,p.updated_at,
       (SELECT count(*) FROM documents d WHERE d.project_id=p.id) document_count,
-      (SELECT count(*) FROM documents d WHERE d.project_id=p.id AND d.qa_status='review-required' AND d.reviewed_at IS NULL) awaiting_review
+      (SELECT count(*) FROM documents d WHERE d.project_id=p.id AND d.qa_status='review-required' AND (d.review_outcome IS NULL OR d.review_outcome='inconclusive')) awaiting_review
       FROM projects p ORDER BY p.updated_at DESC LIMIT 500""")]
 
 
@@ -266,7 +266,7 @@ def get_document(db, a):
         "SELECT id,kind,status,created_at,closed_at,reviewer_label,revision FROM corrective_actions WHERE document_id=? ORDER BY id DESC",
         (document_id,))]
     item["actionHistory"] = [row_dict(row) for row in db.execute("""
-        SELECT a.kind,e.status,e.timestamp FROM action_events e
+        SELECT a.kind,e.status,e.timestamp,e.reviewer_label FROM action_events e
         JOIN corrective_actions a ON a.id=e.action_id
         WHERE a.document_id=? ORDER BY e.id DESC LIMIT 100""", (document_id,))]
     return item
@@ -296,9 +296,9 @@ def list_documents(db, a):
         query += " AND d.qa_status=?"
         params.append(status)
     if review == "pending":
-        query += " AND d.reviewed_at IS NULL"
+        query += " AND (d.review_outcome IS NULL OR d.review_outcome='inconclusive')"
     elif review == "reviewed":
-        query += " AND d.reviewed_at IS NOT NULL"
+        query += " AND d.review_outcome IS NOT NULL AND d.review_outcome!='inconclusive'"
     if search.strip():
         # Escaped LIKE literal; this local-only search may contain a patient name.
         query += " AND d.display_name LIKE ? ESCAPE '\\'"
@@ -328,7 +328,7 @@ def summary(db, a):
       coalesce(sum(qa_status='review-required'),0) review_required,
       coalesce(sum(qa_status='analysis-failed'),0) analysis_failed,
       coalesce(sum(reviewed_at IS NOT NULL),0) reviewed,
-      coalesce(sum(qa_status='review-required' AND reviewed_at IS NULL),0) pending_review
+      coalesce(sum(qa_status='review-required' AND (review_outcome IS NULL OR review_outcome='inconclusive')),0) pending_review
       FROM documents WHERE project_id=?""",(pid,)).fetchone())
 
 
@@ -355,32 +355,39 @@ def review_document(db, a):
 
 def create_action(db, a):
     doc, kind = a.get("documentId"), a.get("kind")
+    reviewer = a.get("reviewerLabel", "")
     if not valid_id(doc) or kind not in ACTION_KINDS:
         raise ValueError("Invalid corrective action")
+    if not isinstance(reviewer, str) or len(reviewer) > 120 or "\x00" in reviewer:
+        raise ValueError("Invalid reviewer label")
     row = db.execute("SELECT revision FROM documents WHERE id=?", (doc,)).fetchone()
     if not row:
         raise ValueError("Document not found")
     stamp = now()
     with db:
-        cursor = db.execute("""INSERT INTO corrective_actions(document_id,kind,status,created_at,revision)
-          VALUES (?,?,'open',?,?)""",(doc,kind,stamp,row["revision"]))
-        db.execute("INSERT INTO action_events(action_id,status,timestamp) VALUES (?,'open',?)",
-                   (cursor.lastrowid,stamp))
+        cursor = db.execute("""INSERT INTO corrective_actions
+          (document_id,kind,status,created_at,revision,reviewer_label)
+          VALUES (?,?,'open',?,?,?)""",(doc,kind,stamp,row["revision"],reviewer.strip()))
+        db.execute("INSERT INTO action_events(action_id,status,timestamp,reviewer_label) VALUES (?,'open',?,?)",
+                   (cursor.lastrowid,stamp,reviewer.strip()))
     return {"id":cursor.lastrowid,"kind":kind,"status":"open"}
 
 
 def update_action(db, a):
     action_id, status = a.get("actionId"), a.get("status")
+    reviewer = a.get("reviewerLabel", "")
     if not valid_id(action_id) or status not in ACTION_STATUSES:
         raise ValueError("Invalid action update")
+    if not isinstance(reviewer, str) or len(reviewer) > 120 or "\x00" in reviewer:
+        raise ValueError("Invalid reviewer label")
     stamp = now()
     with db:
         cursor = db.execute("UPDATE corrective_actions SET status=?,closed_at=? WHERE id=?",
              (status,stamp if status != "open" else None,action_id))
         if not cursor.rowcount:
             raise ValueError("Action not found")
-        db.execute("INSERT INTO action_events(action_id,status,timestamp) VALUES (?,?,?)",
-                   (action_id,status,stamp))
+        db.execute("INSERT INTO action_events(action_id,status,timestamp,reviewer_label) VALUES (?,?,?,?)",
+                   (action_id,status,stamp,reviewer.strip()))
     return {"id":action_id,"status":status}
 
 
