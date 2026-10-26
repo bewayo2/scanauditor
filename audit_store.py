@@ -318,6 +318,20 @@ def list_documents(db, a):
     return {"total":total,"page":page,"limit":limit,"rows":[row_dict(row) for row in rows]}
 
 
+def list_finding_types(db, a):
+    project_id = a.get("projectId")
+    if not valid_string(project_id, 90):
+        raise ValueError("Choose an audit project")
+    # Only observed review findings are shown. All labels are rendered locally
+    # from a fixed dictionary, never from clinical text.
+    return [row_dict(row) for row in db.execute("""
+      SELECT f.code, count(DISTINCT f.document_id) AS documents
+      FROM findings f JOIN documents d ON d.id=f.document_id
+      WHERE d.project_id=? AND f.kind='review'
+      GROUP BY f.code ORDER BY documents DESC, f.code LIMIT 250
+      """, (project_id,))]
+
+
 def summary(db, a):
     pid = a.get("projectId")
     if not valid_string(pid, 90):
@@ -449,6 +463,7 @@ HANDLERS = {
     "saveDocument": save_document,
     "getDocument": get_document,
     "listDocuments": list_documents,
+    "listFindingTypes": list_finding_types,
     "summary": summary,
     "reviewDocument": review_document,
     "createAction": create_action,

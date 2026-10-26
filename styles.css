@@ -7,7 +7,7 @@
 
 body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #4c398e 0%, #493474 100%);
     min-height: 100vh;
     color: #333;
 }
@@ -177,7 +177,7 @@ body {
 }
 
 .btn-primary {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #4c398e 0%, #493474 100%);
     color: white;
 }
 
@@ -197,7 +197,7 @@ body {
 }
 
 .btn-success {
-    background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+    background: linear-gradient(135deg, #166534 0%, #15803d 100%);
     color: white;
 }
 
@@ -1039,6 +1039,39 @@ body {
 @media (max-width: 650px) {
   .audit-record-detail { padding: 12px; }
   .audit-queue-pagination { justify-content: flex-start; }
+}
+
+/* High-contrast audit workspace: these controls sit directly on the purple
+   background, unlike light cards where darker text is required. Main gradient
+   has at least 9:1 contrast with white text at either end. */
+.file-section > .cost-planning label,
+.audit-workspace .audit-queue-toolbar label,
+.file-section > .approval-line,
+.file-section > .small-note,
+.audit-workspace > .small-note,
+.audit-workspace > .audit-filter-help {
+    color: #ffffff;
+}
+.file-section > .small-note,
+.audit-workspace > .small-note,
+.audit-workspace > .audit-filter-help {
+    font-size: 14px;
+    line-height: 1.6;
+}
+.audit-filter-help {
+    margin: 8px 0 14px;
+}
+.file-section > .approval-line { font-size: 15px; }
+.file-section > .cost-planning label,
+.audit-workspace .audit-queue-toolbar label { font-size: 14px; }
+.audit-queue-toolbar input::placeholder { color: #526075; opacity: 1; }
+.provider-section .section-header h2,
+.cost-section .section-header h2 {
+    color: #24334a;
+}
+.provider-section .section-header p,
+.cost-section .section-header p {
+    color: #45546c;
 }
 
 /* Human scan-quality review feedback (recorded without PHI). */

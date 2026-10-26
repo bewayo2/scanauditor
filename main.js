@@ -262,6 +262,8 @@ ipcMain.handle('save-review-disposition', async (_event, payload) => {
 ipcMain.handle('audit-list-projects', async () => (await getWorkspace()).listProjects());
 ipcMain.handle('audit-list-documents', async (_event, args) =>
   (await getWorkspace()).listDocuments(args || {}));
+ipcMain.handle('audit-list-finding-types', async (_event, projectId) =>
+  (await getWorkspace()).listFindingTypes(projectId));
 ipcMain.handle('audit-summary', async (_event, projectId) =>
   (await getWorkspace()).summary(projectId));
 ipcMain.handle('audit-get-document', async (_event, documentId) =>
