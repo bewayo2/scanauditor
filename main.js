@@ -273,6 +273,50 @@ ipcMain.handle('audit-create-action', async (_event, args) =>
   (await getWorkspace()).createAction(args?.documentId, args?.kind));
 ipcMain.handle('audit-update-action', async (_event, args) =>
   (await getWorkspace()).updateAction(args?.actionId, args?.status));
+ipcMain.handle('audit-reanalyze-document', async (_event, request) => {
+  if (activeBulk || activeAnalysis || activeBulkPreview || costResetPending) {
+    throw new Error('Stop other scan activity before reanalyzing.');
+  }
+  const documentId = request?.documentId;
+  const workspace = await getWorkspace();
+  const record = await workspace.getDocument(documentId);
+  if (!record) throw new Error('Audit record not found');
+  const projects = await workspace.listProjects();
+  const project = projects.find(item => item.id === record.project_id);
+  if (!project) throw new Error('Audit project unavailable');
+  const mode = project.mode;
+  if (mode !== 'local' && (!sessionOpenAIKey || request?.hospitalApproved !== true)) {
+    throw new Error('Hospital authorization and a project API key are required for cloud reanalysis.');
+  }
+  activeAnalysis = true;
+  try {
+    const source = await fs.realpath(record.source_path);
+    if (path.extname(source).toLowerCase() !== '.pdf' || !(await fs.stat(source)).isFile()) {
+      throw new Error('Source PDF is unavailable');
+    }
+    const runId = crypto.randomUUID();
+    const analyzer = mode === 'local' ? new ConfiguredAnalyzer() :
+      new CloudScanAnalyzer({
+        mode, apiKey: sessionOpenAIKey,
+        onUsage: entry => costTracker.recordUsage(app.getPath('userData'), { ...entry, runId })
+      });
+    let result;
+    try {
+      result = await analyzer.analyzeFile({ path: source, originalname: path.basename(source) });
+    } catch (_) {
+      result = failureResult(source, new Error('Analysis failed; see the QA result.'));
+    }
+    const saved = await workspace.saveDocument(record.project_id, source, result, runId);
+    await writeAuditRecord(result);
+    await costTracker.recordRun(app.getPath('userData'), {
+      runId, mode, fileCount: 1, totalPages: Number(result?.analysis?.fileInformation?.totalPages) || 0,
+      pagesUnknown: Number(result?.analysis?.fileInformation?.totalPages) > 0 ? 0 : 1
+    });
+    return { documentId: saved.id, qaStatus: saved.qaStatus, revision: saved.revision };
+  } finally {
+    activeAnalysis = false;
+  }
+});
 ipcMain.handle('audit-open-pdf', async (_event, documentId) => {
   const record = await (await getWorkspace()).getDocument(documentId);
   if (!record) throw new Error('Audit record not found');
