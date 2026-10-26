@@ -8,6 +8,7 @@ const ConfiguredAnalyzer = require('./configured_analyzer');
 const CloudScanAnalyzer = require('./cloud_analyzer');
 const { recordUsage, recordRun, usageCost } = require('./cost_tracker');
 const { evidenceReport } = require('./evidence_report');
+const { AuditStore } = require('./audit_store');
 const pdfParse = require('pdf-parse');
 
 const MODES = new Set(['local', 'tiered', 'astra']);
@@ -15,7 +16,8 @@ const MODIFIERS = Object.freeze({ maxDepth: 40 });
 
 function jobDirectory(userData, root, mode) {
   // No directory names, patient names or source file paths in journal.
-  const key = crypto.createHash('sha256').update(path.resolve(root) + '\0' + mode).digest('hex');
+  // New SQLite-backed workspace starts fresh; legacy test checkpoints are not imported.
+  const key = crypto.createHash('sha256').update(path.resolve(root) + '\0' + mode + '\0sqlite-v1').digest('hex');
   return path.join(userData, 'bulk-audit', key);
 }
 function makeFileKey(secret, rel, stat) {
@@ -141,7 +143,7 @@ async function runBulkAudit({
   root, userData, mode = 'local', apiKey = null, hospitalApproved = false,
   onProgress = () => {}, cancellation = { requested: false }, maxFiles = Infinity,
   retryFailed = false, maxUsd = 5, analyzerFactory = null,
-  inventory = null, readPageCount = readPdfPageCount
+  inventory = null, readPageCount = readPdfPageCount, store = null
 } = {}) {
   if (!MODES.has(mode)) throw new Error('Unsupported bulk analysis mode.');
   if (!root || !userData) throw new Error('Choose a PDF folder.');
@@ -176,6 +178,8 @@ async function runBulkAudit({
   }
   if (inventory.canceled) return { ...inventory, stopped: true, processed: 0, skippedFromCheckpoint: 0,
     reviewRequired: 0, analysisFailed: 0, pagesProcessed: 0, meteredSpendUSD: 0 };
+  const auditStore = store || new AuditStore(userData);
+  const auditProject = await auditStore.upsertProject(normalizedRoot, mode, 'folder');
   const runId = crypto.randomUUID();
   let meteredSpendUSD = 0;
   const onUsage = async entry => {
@@ -240,6 +244,9 @@ async function runBulkAudit({
           jobFileKey: key, runId, ...evidenceReport(result)
         }) + '\n');
       }
+      // The indexed workspace must be written before the checkpoint.
+      // Source path and detailed analysis stay in the local SQLite file.
+      await auditStore.saveDocument(auditProject.id, pdfPath, result, runId, key);
       await fs.appendFile(journal, JSON.stringify({
         key, status: safeStatus, timestamp: new Date().toISOString()
       }) + '\n');
@@ -257,8 +264,9 @@ async function runBulkAudit({
       pagesUnknown: counters.analysisFailed
     });
     onProgress({ ...counters });
+    if (!store) await auditStore.close();
   }
-  return { ...counters, jobId: path.basename(output),
+  return { ...counters, projectId: auditProject.id, jobId: path.basename(output),
     disclaimer: 'Batch checkpoint and evidence contain no patient text. Paper completeness still requires independent source comparison.' };
 }
 module.exports = { runBulkAudit, inspectBulkFolder, walkPdfs, readJournal, makeFileKey, jobDirectory };
