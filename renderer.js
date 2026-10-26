@@ -739,6 +739,26 @@ function queueCell(row, text) {
   row.appendChild(cell);
   return cell;
 }
+async function refreshFindingTypes(projectId) {
+  const selector = byId('audit-finding');
+  const previous = selector.value;
+  const types = projectId
+    ? await window.electronAPI.auditListFindingTypes(projectId) : [];
+  selector.replaceChildren();
+  const option = document.createElement('option');
+  option.value = '';
+  option.textContent = 'All problem types';
+  selector.appendChild(option);
+  for (const item of types) {
+    const choice = document.createElement('option');
+    choice.value = item.code;
+    choice.textContent = findingLabel(item.code) + ' (' +
+      Number(item.documents).toLocaleString('en-US') + ')';
+    selector.appendChild(choice);
+  }
+  selector.value = types.some(item => item.code === previous) ? previous : '';
+}
+
 async function refreshAuditProjects(preferredId = null) {
   const projects = await window.electronAPI.auditListProjects();
   const selector = byId('audit-project');
@@ -762,6 +782,7 @@ async function refreshAuditProjects(preferredId = null) {
     selector.appendChild(option);
   }
   selector.value = projects.some(p => p.id === previous) ? previous : projects[0].id;
+  await refreshFindingTypes(selector.value);
   if (preferredId) {
     auditQueueState.page = 1;
     byId('audit-status-filter').value = 'review-required';
@@ -777,7 +798,7 @@ async function refreshAuditQueue() {
     status: byId('audit-status-filter').value,
     review: byId('audit-review-filter').value,
     search: byId('audit-search').value.trim(),
-    findingCode: byId('audit-finding').value.trim().toUpperCase()
+    findingCode: byId('audit-finding').value
   };
   const [data, summary] = await Promise.all([
     window.electronAPI.auditListDocuments(params),
@@ -797,7 +818,9 @@ async function refreshAuditQueue() {
     queueCell(tr, item.display_name);
     queueCell(tr, item.page_count);
     queueCell(tr, qaLabel(item.qa_status));
-    queueCell(tr, item.finding_codes || '—');
+    queueCell(tr, item.finding_codes
+      ? item.finding_codes.split(',').map(code => findingLabel(code.trim())).join('; ')
+      : '—');
     queueCell(tr, item.review_outcome
       ? item.review_outcome + ' (' + item.comparison_basis + ')' : 'Awaiting human review');
     queueCell(tr, item.open_actions);
@@ -1145,17 +1168,22 @@ byId('audit-search-button').addEventListener('click', () => {
   auditQueueState.page = 1;
   refreshAuditQueue().catch(() => showNotification('Could not filter cases.', 'error'));
 });
-byId('audit-project').addEventListener('change', () => {
+byId('audit-project').addEventListener('change', async () => {
   auditQueueState.page = 1;
-  refreshAuditQueue().catch(() => {});
+  try {
+    await refreshFindingTypes(byId('audit-project').value);
+    await refreshAuditQueue();
+  } catch (_) {
+    showNotification('Could not load audit issue types.', 'error');
+  }
 });
-for (const id of ['audit-status-filter', 'audit-review-filter']) {
+for (const id of ['audit-status-filter', 'audit-review-filter', 'audit-finding']) {
   byId(id).addEventListener('change', () => {
     auditQueueState.page = 1;
     refreshAuditQueue().catch(() => {});
   });
 }
-for (const id of ['audit-search', 'audit-finding']) {
+for (const id of ['audit-search']) {
   byId(id).addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       auditQueueState.page = 1;
