@@ -62,6 +62,12 @@ Results are **Automated QA Passed**, **Review Required**, or **Analysis Failed**
 
 ScanAuditor now checks **internal PDF pagination gaps** (not completeness against the original paper), observes printed text/handwriting/stamps/signatures/marginal notes when using approved cloud inference, and produces PHI-minimized JSON evidence with a file hash, version details, categorical findings and a digest. The desktop app includes an optional **Resumable Folder Audit** with checkpointed scanning, stop/resume and a local evidence journal. A CLI is also available for supervised archive trials. See [PRESERVATION_QA.md](PRESERVATION_QA.md) for workflow, scale limits and safety requirements.
 
+## Bulk-first SQLite review workspace
+
+The main workflow is **Resumable Folder Audit → Audit Projects & Review Queue → Record Review**. Analyze a folder, then review indexed findings and manual decisions without re-running every PDF. The app creates a local SQLite database automatically through the existing Python runtime—no separate SQLite server or native Node add-on is required. It displays 50 results per page, supports finding/status/search filters, and provides the detailed individual audit report, human-review dispositions, original PDF opening, rescan/paper-comparison actions, audit history, evidence exports and per-record reanalysis. Individual PDF audits feed the same case store.
+
+**Security:** The SQLite database contains source paths, detailed analysis and potentially patient identifiers. It is not encrypted on its own, is designed for one hospital-controlled workstation, and must reside on an encrypted/managed local disk. CSV exports and backups require an explicit warning. It does not grant paper-disposal authorization. See [PRESERVATION_QA.md](PRESERVATION_QA.md) for deployment/retention cautions.
+
 ## Optional OpenAI models and costing
 
 The user can select **Local only**, **GPT-6 Luna with GPT-6.1 Sol fallback**, or **GPT-6 Astra benchmark**. One cloud multimodal request per page extracts text, patient fields, dates, and quality observations. The app only sends medical images externally when cloud mode is explicitly selected, an API key has been entered, and hospital authorization is confirmed. The API key is kept in memory for this session, not persisted.
