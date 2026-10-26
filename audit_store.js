@@ -97,6 +97,7 @@ class AuditStore {
   }
   listProjects() { return this.call('listProjects'); }
   listDocuments(args) { return this.call('listDocuments', args); }
+  listFindingTypes(projectId) { return this.call('listFindingTypes', { projectId }); }
   summary(projectId) { return this.call('summary', { projectId }); }
   getDocument(documentId) { return this.call('getDocument', { documentId }); }
   reviewDocument(documentId, outcome, reviewerLabel = '') {
