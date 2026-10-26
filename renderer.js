@@ -844,7 +844,8 @@ function renderAuditHistory(record) {
     box.appendChild(el('h4', '', 'Corrective Action History'));
     const events = document.createElement('ul');
     for (const event of record.actionHistory) {
-      events.appendChild(el('li', '', event.timestamp + ' · ' + event.kind + ' · ' + event.status));
+      events.appendChild(el('li', '', event.timestamp + ' · ' + event.kind + ' · ' + event.status +
+        (event.reviewer_label ? ' · Staff label: ' + event.reviewer_label : '')));
     }
     box.appendChild(events);
   }
@@ -863,7 +864,10 @@ function renderAuditHistory(record) {
         button.type = 'button';
         button.addEventListener('click', async () => {
           try {
-            await window.electronAPI.auditUpdateAction({ actionId: action.id, status });
+            await window.electronAPI.auditUpdateAction({
+              actionId: action.id, status,
+              reviewerLabel: byId('audit-action-reviewer').value.trim()
+            });
             await openAuditDocument(record.id);
           } catch (_) { showNotification('Could not update the corrective action.', 'error'); }
         });
@@ -892,7 +896,10 @@ async function openAuditDocument(documentId) {
 async function auditAction(kind) {
   if (!auditQueueState.detailId) return;
   try {
-    await window.electronAPI.auditCreateAction({ documentId: auditQueueState.detailId, kind });
+    await window.electronAPI.auditCreateAction({
+      documentId: auditQueueState.detailId, kind,
+      reviewerLabel: byId('audit-action-reviewer').value.trim()
+    });
     await openAuditDocument(auditQueueState.detailId);
     await refreshAuditQueue();
     showNotification('Corrective action added to this case.', 'success');
