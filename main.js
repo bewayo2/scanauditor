@@ -317,6 +317,53 @@ ipcMain.handle('audit-reanalyze-document', async (_event, request) => {
     activeAnalysis = false;
   }
 });
+ipcMain.handle('audit-export-summary', async (_event, projectId) => {
+  const projects = await (await getWorkspace()).listProjects();
+  if (!projects.some(item => item.id === projectId)) throw new Error('Audit project unavailable');
+  const confirmation = await dialog.showMessageBox(mainWindow, {
+    type: 'warning', buttons: ['Cancel', 'Export Local CSV'],
+    defaultId: 0, cancelId: 0, noLink: true,
+    message: 'Export filenames and review results?',
+    detail: 'The CSV can contain patient-identifying filenames. Save only to hospital-approved secure storage.'
+  });
+  if (confirmation.response !== 1) return { canceled: true };
+  const chosen = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export audit summary (contains source filenames)',
+    defaultPath: 'ScanAuditor_Project_Review_Summary.csv',
+    filters: [{ name: 'CSV summary', extensions: ['csv'] }]
+  });
+  if (chosen.canceled || !chosen.filePath) return { canceled: true };
+  return (await getWorkspace()).exportQueue(projectId, chosen.filePath);
+});
+ipcMain.handle('audit-backup-database', async () => {
+  if (activeBulk || activeAnalysis || activeBulkPreview) throw new Error('Stop scans before backing up.');
+  const confirmation = await dialog.showMessageBox(mainWindow, {
+    type: 'warning', buttons: ['Cancel', 'Save Database Backup'],
+    defaultId: 0, cancelId: 0, noLink: true,
+    message: 'Create a sensitive audit database backup?',
+    detail: 'The SQLite backup contains detailed hospital audit results, local file paths, and possibly patient identifiers. Choose hospital-approved encrypted storage.'
+  });
+  if (confirmation.response !== 1) return { canceled: true };
+  const chosen = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save private SQLite audit database',
+    defaultPath: 'ScanAuditor_Workspace_Backup.sqlite3',
+    filters: [{ name: 'SQLite Database', extensions: ['sqlite3'] }]
+  });
+  if (chosen.canceled || !chosen.filePath) return { canceled: true };
+  return (await getWorkspace()).backupDatabase(chosen.filePath);
+});
+ipcMain.handle('audit-export-evidence', async (_event, documentId) => {
+  const record = await (await getWorkspace()).getDocument(documentId);
+  if (!record) throw new Error('Audit record not found');
+  const chosen = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export PHI-minimized audit evidence for this record',
+    defaultPath: 'ScanAuditor_Record_Evidence.json',
+    filters: [{ name: 'QA evidence JSON', extensions: ['json'] }]
+  });
+  if (chosen.canceled || !chosen.filePath) return { canceled: true };
+  await fs.writeJson(chosen.filePath, record.evidence, { spaces: 2 });
+  return { saved: true };
+});
 ipcMain.handle('audit-open-pdf', async (_event, documentId) => {
   const record = await (await getWorkspace()).getDocument(documentId);
   if (!record) throw new Error('Audit record not found');
