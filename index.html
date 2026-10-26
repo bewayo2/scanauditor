@@ -100,7 +100,7 @@
             <option value="analysis-failed">Analysis failed</option><option value="passed">Passed (sample review)</option>
           </select></div>
           <div><label for="audit-review-filter">Human review</label><select id="audit-review-filter">
-            <option value="all">All</option><option value="pending" selected>Awaiting review</option>
+            <option value="all">All</option><option value="pending" selected>Unresolved (includes inconclusive)</option>
             <option value="reviewed">Reviewed</option></select></div>
           <div><label for="audit-search">Search local filenames</label>
             <input id="audit-search" maxlength="160" placeholder="Filename contains…" /></div>
@@ -134,6 +134,8 @@
             <button id="audit-close-detail" type="button" class="btn btn-secondary">Back to Review Queue</button>
           </div>
           <div class="audit-detail-actions">
+            <label for="audit-action-reviewer">Staff ID for corrective actions (not authenticated)</label>
+            <input id="audit-action-reviewer" type="text" maxlength="120" placeholder="Optional staff ID" autocomplete="off" />
             <button id="audit-open-pdf" class="btn btn-secondary" type="button">Open Original PDF</button>
             <button id="audit-export-evidence" class="btn btn-secondary" type="button">Export QA Evidence</button>
             <button id="audit-reanalyze" class="btn btn-secondary" type="button">Reanalyze This Record</button>
