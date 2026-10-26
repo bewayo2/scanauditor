@@ -8,7 +8,7 @@ const path = require('node:path');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const script = fs.readFileSync(path.join(__dirname, '..', 'renderer.js'), 'utf8');
 const start = html.indexOf('<section class="cost-section"');
-const end = html.indexOf('<section class="file-section"', start);
+const end = html.indexOf('<section class="results-section"', start);
 const section = html.slice(start, end);
 
 test('page-first cost screen exposes one page target and hides advanced controls by default', () => {
