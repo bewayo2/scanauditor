@@ -199,3 +199,24 @@ test('corrective-action transitions preserve optional staff labels as unauthenti
   const loaded = await store.getDocument(doc.id);
   assert.deepEqual(loaded.actionHistory.map(x => x.reviewer_label), ['Operator B', 'Operator A']);
 });
+
+
+test('problem type dropdown includes only review findings for its selected project', async t => {
+  const { store, project, root } = await setup(t);
+  const first = await store.saveDocument(project.id, path.join(root, 'first.pdf'),
+    analysis('first.pdf', 'review-required'));
+  await store.saveDocument(project.id, path.join(root, 'second.pdf'),
+    analysis('second.pdf', 'review-required'));
+  const another = await store.upsertProject(path.join(root, 'second-area'), 'local', 'folder');
+  await store.saveDocument(another.id, path.join(root, 'third.pdf'),
+    analysis('third.pdf', 'review-required'));
+  const types = await store.listFindingTypes(project.id);
+  assert.deepEqual(types, [{ code: 'CUT_OFF_TEXT', documents: 2 }]);
+  assert.deepEqual(await store.listFindingTypes(another.id), [{ code: 'CUT_OFF_TEXT', documents: 1 }]);
+  assert.equal((await store.listDocuments({ projectId: project.id,
+    findingCode: types[0].code, status: 'all', review: 'all' })).total, 2);
+  await store.reviewDocument(first.id, 'model-false-positive', 'Tester');
+  // A human review changes disposition, but not the recorded automated category.
+  assert.deepEqual(await store.listFindingTypes(project.id), types);
+  await assert.rejects(store.listFindingTypes(''), /SQLite/);
+});
