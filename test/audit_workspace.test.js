@@ -169,3 +169,33 @@ test('corrective-action status changes create append-only history without losing
   assert.deepEqual(doc.actionHistory.map(x => x.status), ['open', 'completed', 'open']);
   assert.equal(doc.actions[0].status, 'open');
 });
+
+
+test('inconclusive reviews remain in the unresolved queue until a definitive decision', async t => {
+  const { store, project, root } = await setup(t);
+  const doc = await store.saveDocument(project.id, path.join(root, 'uncertain.pdf'),
+    analysis('uncertain.pdf', 'review-required'));
+  await store.reviewDocument(doc.id, 'inconclusive', 'Test reviewer');
+  const unresolved = await store.listDocuments({
+    projectId: project.id, status: 'review-required', review: 'pending'
+  });
+  assert.equal(unresolved.total, 1);
+  assert.equal((await store.summary(project.id)).pending_review, 1);
+  await store.reviewDocument(doc.id, 'model-false-positive', 'Test reviewer');
+  assert.equal((await store.listDocuments({
+    projectId: project.id, status: 'review-required', review: 'pending'
+  })).total, 0);
+  assert.equal((await store.listDocuments({
+    projectId: project.id, status: 'review-required', review: 'reviewed'
+  })).total, 1);
+});
+
+test('corrective-action transitions preserve optional staff labels as unauthenticated provenance', async t => {
+  const { store, project, root } = await setup(t);
+  const doc = await store.saveDocument(project.id, path.join(root, 'review.pdf'),
+    analysis('review.pdf', 'review-required'));
+  const action = await store.createAction(doc.id, 'rescan', 'Operator A');
+  await store.updateAction(action.id, 'completed', 'Operator B');
+  const loaded = await store.getDocument(doc.id);
+  assert.deepEqual(loaded.actionHistory.map(x => x.reviewer_label), ['Operator B', 'Operator A']);
+});
