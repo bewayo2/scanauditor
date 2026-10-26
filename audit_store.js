@@ -104,6 +104,8 @@ class AuditStore {
   }
   createAction(documentId, kind) { return this.call('createAction', { documentId, kind }); }
   updateAction(actionId, status) { return this.call('updateAction', { actionId, status }); }
+  exportQueue(projectId, destination) { return this.call('exportQueue', { projectId, destination }); }
+  backupDatabase(destination) { return this.call('backupDatabase', { destination }); }
 
   async close() {
     if (this.closed) return;
