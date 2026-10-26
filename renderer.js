@@ -155,6 +155,7 @@ async function analyzeSelectedFiles() {
     analysisResults = Array.isArray(response?.results) ? response.results : [];
     displayResults();
     showNotification(`Automated QA completed for ${analysisResults.length} file(s).`, 'success');
+    refreshAuditProjects().catch(() => {});
   } catch (error) {
     showNotification(`Automated QA failed: ${error.message}`, 'error');
   } finally {
@@ -389,6 +390,11 @@ function createReviewFeedback(analysis) {
     option.value = value;
     selector.appendChild(option);
   }
+  const reviewer = el('input', 'review-outcome-select');
+  reviewer.type = 'text';
+  reviewer.maxLength = 120;
+  reviewer.placeholder = 'Reviewer name or staff ID (not authenticated)';
+  reviewer.setAttribute('aria-label', 'Reviewer name or staff ID (not authenticated)');
   const save = el('button', 'btn btn-secondary', 'Save Review Outcome');
   save.type = 'button';
   const feedback = el('p', 'small-note', 'No human review outcome recorded for this file.');
@@ -398,15 +404,19 @@ function createReviewFeedback(analysis) {
       return;
     }
     try {
-      const saved = await window.electronAPI.saveReviewDisposition({ fileSha256: hash, outcome: selector.value });
+      const saved = await window.electronAPI.saveReviewDisposition({
+        fileSha256: hash, documentId: analysis.workspaceDocumentId || null,
+        outcome: selector.value, reviewerLabel: reviewer.value.trim()
+      });
       analysis.manualDisposition = saved;
       feedback.textContent = 'Saved: ' + options.find(([key]) => key === saved.outcome)[1] + ' (' + saved.comparisonBasis + ').';
       showNotification('Review outcome saved locally.', 'success');
+      refreshAuditQueue().catch(() => {});
     } catch (_) {
       showNotification('Could not save the review outcome.', 'error');
     }
   });
-  window.electronAPI.getReviewDisposition(hash).then(existing => {
+  window.electronAPI.getReviewDisposition(hash, analysis.workspaceDocumentId || null).then(existing => {
     if (!existing) return;
     selector.value = existing.outcome;
     analysis.manualDisposition = existing;
@@ -414,7 +424,7 @@ function createReviewFeedback(analysis) {
       (options.find(([key]) => key === existing.outcome)?.[1] || existing.outcome) +
       ' (' + existing.comparisonBasis + ').';
   }).catch(() => {});
-  section.append(selector, save, feedback);
+  section.append(selector, reviewer, save, feedback);
   return section;
 }
 
@@ -695,6 +705,7 @@ async function startBulkAudit() {
       maxFiles, maxUsd
     });
     renderBulkProgress(result);
+    await refreshAuditProjects(result.projectId);
     showNotification(result.stopped ? 'Folder audit paused. You can resume it.' : 'Folder audit completed.', 'success');
   } catch (_) {
     byId('bulk-phase').textContent = 'Folder audit stopped unexpectedly';
@@ -718,6 +729,188 @@ async function stopBulkAudit() {
     : 'Stop requested; current PDF will finish before the checkpoint is saved.';
 }
 
+// SQLite-backed workspace: bounded 50-row pages instead of loading an entire
+// hospital archive into the renderer. Only the selected case is hydrated.
+const auditQueueState = { page: 1, total: 0, limit: 50, detailId: null };
+const queueFormat = x => Number(x || 0).toLocaleString('en-US');
+function queueCell(row, text) {
+  const cell = document.createElement('td');
+  cell.textContent = String(text ?? '');
+  row.appendChild(cell);
+  return cell;
+}
+async function refreshAuditProjects(preferredId = null) {
+  const projects = await window.electronAPI.auditListProjects();
+  const selector = byId('audit-project');
+  const previous = preferredId || selector.value;
+  selector.replaceChildren();
+  if (!projects.length) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No scans indexed yet';
+    selector.appendChild(option);
+    byId('audit-case-total').textContent = 'No audit records yet';
+    byId('audit-queue-stats').textContent = 'Start a folder audit to create an indexed review project.';
+    byId('audit-queue-rows').replaceChildren();
+    return;
+  }
+  for (const project of projects) {
+    const option = document.createElement('option');
+    option.value = project.id;
+    option.textContent = project.label + ' · ' + project.mode + ' · ' +
+      queueFormat(project.document_count) + ' records';
+    selector.appendChild(option);
+  }
+  selector.value = projects.some(p => p.id === previous) ? previous : projects[0].id;
+  if (preferredId) {
+    auditQueueState.page = 1;
+    byId('audit-status-filter').value = 'review-required';
+    byId('audit-review-filter').value = 'pending';
+  }
+  await refreshAuditQueue();
+}
+async function refreshAuditQueue() {
+  const projectId = byId('audit-project').value;
+  if (!projectId) return;
+  const params = {
+    projectId, page: auditQueueState.page, limit: auditQueueState.limit,
+    status: byId('audit-status-filter').value,
+    review: byId('audit-review-filter').value,
+    search: byId('audit-search').value.trim(),
+    findingCode: byId('audit-finding').value.trim().toUpperCase()
+  };
+  const [data, summary] = await Promise.all([
+    window.electronAPI.auditListDocuments(params),
+    window.electronAPI.auditSummary(projectId)
+  ]);
+  auditQueueState.total = data.total;
+  const tbody = byId('audit-queue-rows');
+  tbody.replaceChildren();
+  if (!data.rows.length) {
+    const tr = document.createElement('tr');
+    const cell = queueCell(tr, 'No documents match the selected filters.');
+    cell.colSpan = 7;
+    tbody.appendChild(tr);
+  }
+  for (const item of data.rows) {
+    const tr = document.createElement('tr');
+    queueCell(tr, item.display_name);
+    queueCell(tr, item.page_count);
+    queueCell(tr, qaLabel(item.qa_status));
+    queueCell(tr, item.finding_codes || '—');
+    queueCell(tr, item.review_outcome
+      ? item.review_outcome + ' (' + item.comparison_basis + ')' : 'Awaiting human review');
+    queueCell(tr, item.open_actions);
+    const cell = document.createElement('td');
+    const button = el('button', 'btn btn-secondary', 'Inspect');
+    button.type = 'button';
+    button.addEventListener('click', () => openAuditDocument(item.id).catch(() =>
+      showNotification('Could not open record details.', 'error')));
+    cell.appendChild(button);
+    tr.appendChild(cell);
+    tbody.appendChild(tr);
+  }
+  byId('audit-case-total').textContent =
+    queueFormat(summary.documents) + ' records · ' + queueFormat(summary.pages) +
+    ' pages · ' + queueFormat(summary.pending_review) + ' awaiting review';
+  byId('audit-queue-stats').textContent = queueFormat(summary.passed) +
+    ' passed automated QA · ' + queueFormat(summary.review_required) +
+    ' review-required · ' + queueFormat(summary.analysis_failed) +
+    ' analysis failed · ' + queueFormat(summary.reviewed) + ' manual reviews recorded';
+  const pages = Math.max(1, Math.ceil(data.total / data.limit));
+  byId('audit-page-label').textContent = 'Page ' + data.page + ' of ' + pages +
+    ' · ' + queueFormat(data.total) + ' matching records';
+  byId('audit-previous').disabled = data.page <= 1;
+  byId('audit-next').disabled = data.page >= pages;
+}
+function renderAuditHistory(record) {
+  const box = byId('audit-record-history');
+  box.replaceChildren();
+  const header = el('h4', '', 'Human Review History');
+  box.appendChild(header);
+  if (!record.reviews?.length) {
+    box.appendChild(el('p', 'small-note', 'No manual review has been recorded for this document.'));
+  } else {
+    const list = document.createElement('ul');
+    for (const review of record.reviews) {
+      const label = [review.timestamp, review.outcome, review.comparison_basis,
+        review.reviewer_label ? 'Reviewer label: ' + review.reviewer_label : null]
+        .filter(Boolean).join(' · ');
+      list.appendChild(el('li', '', label));
+    }
+    box.appendChild(list);
+  }
+  box.appendChild(el('h4', '', 'Corrective Actions'));
+  const actions = byId('audit-record-actions');
+  actions.replaceChildren();
+  if (!record.actions?.length) {
+    actions.appendChild(el('p', 'small-note', 'No corrective actions recorded.'));
+  }
+  for (const action of record.actions || []) {
+    const line = el('div', 'audit-action-line');
+    line.append(el('span', '', action.kind + ' · ' + action.status + ' · ' + action.created_at));
+    if (action.status === 'open') {
+      for (const [status, label] of [['completed', 'Complete'], ['canceled', 'Cancel']]) {
+        const button = el('button', 'btn btn-secondary', label);
+        button.type = 'button';
+        button.addEventListener('click', async () => {
+          try {
+            await window.electronAPI.auditUpdateAction({ actionId: action.id, status });
+            await openAuditDocument(record.id);
+          } catch (_) { showNotification('Could not update the corrective action.', 'error'); }
+        });
+        line.appendChild(button);
+      }
+    }
+    actions.appendChild(line);
+  }
+}
+async function openAuditDocument(documentId) {
+  const record = await window.electronAPI.auditGetDocument(documentId);
+  if (!record) throw new Error('Document unavailable');
+  auditQueueState.detailId = record.id;
+  const detail = byId('audit-record-detail');
+  detail.hidden = false;
+  byId('audit-detail-heading').textContent =
+    'Review: ' + record.display_name + ' (' + record.page_count + ' pages)';
+  const analysis = record.analysis || {};
+  analysis.workspaceDocumentId = record.id;
+  analysis.manualDisposition = record.review_outcome
+    ? { outcome: record.review_outcome, comparisonBasis: record.comparison_basis } : null;
+  byId('audit-record-content').replaceChildren(createResultCard({ analysis }));
+  renderAuditHistory(record);
+  detail.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function auditAction(kind) {
+  if (!auditQueueState.detailId) return;
+  try {
+    await window.electronAPI.auditCreateAction({ documentId: auditQueueState.detailId, kind });
+    await openAuditDocument(auditQueueState.detailId);
+    await refreshAuditQueue();
+    showNotification('Corrective action added to this case.', 'success');
+  } catch (_) {
+    showNotification('Could not create corrective action.', 'error');
+  }
+}
+async function reanalyzeSelectedCase() {
+  const id = auditQueueState.detailId;
+  if (!id) return;
+  if (!window.confirm('Reanalyze this PDF? The result and API spend may change. Earlier evidence and review events remain on record.')) return;
+  try {
+    byId('audit-reanalyze').disabled = true;
+    await window.electronAPI.auditReanalyzeDocument({
+      documentId: id, hospitalApproved: hospitalApproved.checked
+    });
+    await openAuditDocument(id);
+    await refreshAuditQueue();
+    refreshCostDashboard().catch(() => {});
+    showNotification('Document reanalysis completed; current results updated.', 'success');
+  } catch (_) {
+    showNotification('Could not reanalyze the record. Check local source and authorization.', 'error');
+  } finally {
+    byId('audit-reanalyze').disabled = false;
+  }
+}
 async function exportToExcel() {
   if (!analysisResults.length) {
     showNotification('There are no results to export.', 'warning');
@@ -931,6 +1124,54 @@ clearFilesBtn.addEventListener('click', () => {
 analyzeFilesBtn.addEventListener('click', analyzeSelectedFiles);
 exportButton.addEventListener('click', exportToExcel);
 byId('export-qa-evidence').addEventListener('click', exportQaEvidence);
+byId('audit-refresh').addEventListener('click', () => refreshAuditProjects().catch(() =>
+  showNotification('Could not refresh audit cases.', 'error')));
+byId('audit-search-button').addEventListener('click', () => {
+  auditQueueState.page = 1;
+  refreshAuditQueue().catch(() => showNotification('Could not filter cases.', 'error'));
+});
+byId('audit-project').addEventListener('change', () => {
+  auditQueueState.page = 1;
+  refreshAuditQueue().catch(() => {});
+});
+for (const id of ['audit-status-filter', 'audit-review-filter']) {
+  byId(id).addEventListener('change', () => {
+    auditQueueState.page = 1;
+    refreshAuditQueue().catch(() => {});
+  });
+}
+for (const id of ['audit-search', 'audit-finding']) {
+  byId(id).addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      auditQueueState.page = 1;
+      refreshAuditQueue().catch(() => {});
+    }
+  });
+}
+byId('audit-next').addEventListener('click', () => {
+  auditQueueState.page += 1;
+  refreshAuditQueue().catch(() => { auditQueueState.page -= 1; });
+});
+byId('audit-previous').addEventListener('click', () => {
+  auditQueueState.page = Math.max(1, auditQueueState.page - 1);
+  refreshAuditQueue().catch(() => {});
+});
+byId('audit-close-detail').addEventListener('click', () => {
+  byId('audit-record-detail').hidden = true;
+  auditQueueState.detailId = null;
+  byId('audit-workspace').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+byId('audit-open-pdf').addEventListener('click', async () => {
+  try { await window.electronAPI.auditOpenPdf(auditQueueState.detailId); }
+  catch (_) { showNotification('Original PDF is unavailable or could not be opened.', 'error'); }
+});
+byId('audit-rescan-task').addEventListener('click', () => auditAction('rescan'));
+byId('audit-paper-task').addEventListener('click', () => auditAction('paper-comparison'));
+byId('audit-reanalyze').addEventListener('click', reanalyzeSelectedCase);
+byId('bulk-review-queue').addEventListener('click', async () => {
+  try { await refreshAuditProjects(); byId('audit-workspace').scrollIntoView({ behavior: 'smooth' }); }
+  catch (_) { showNotification('Could not load the review queue.', 'error'); }
+});
 byId('bulk-folder').addEventListener('click', selectBulkFolder);
 byId('bulk-start').addEventListener('click', startBulkAudit);
 byId('bulk-stop').addEventListener('click', stopBulkAudit);
@@ -953,6 +1194,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.electronAPI.getOpenAIKeyStatus().then(status => {
     if (status?.configured) apiKeyStatus.textContent = 'API key configured for this session.';
   }).catch(() => {});
+  refreshAuditProjects().catch(() => { byId('audit-case-total').textContent = 'Workspace unavailable; verify Python installation.'; });
   refreshCostDashboard().then(data => setPlanInputs(data.plan)).catch(() => {
     byId('cost-basis').textContent = 'Could not load cost records.';
   });
