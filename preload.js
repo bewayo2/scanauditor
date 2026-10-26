@@ -23,5 +23,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveReviewDisposition: payload => ipcRenderer.invoke('save-review-disposition', payload),
   getCostDashboard: mode => ipcRenderer.invoke('get-cost-dashboard', mode),
   saveCostPlan: plan => ipcRenderer.invoke('save-cost-plan', plan),
-  resetCostHistory: () => ipcRenderer.invoke('reset-cost-history')
+  resetCostHistory: () => ipcRenderer.invoke('reset-cost-history'),
+  auditListProjects: () => ipcRenderer.invoke('audit-list-projects'),
+  auditListDocuments: filters => ipcRenderer.invoke('audit-list-documents', filters),
+  auditSummary: projectId => ipcRenderer.invoke('audit-summary', projectId),
+  auditGetDocument: id => ipcRenderer.invoke('audit-get-document', id),
+  auditReviewDocument: request => ipcRenderer.invoke('audit-review-document', request),
+  auditCreateAction: request => ipcRenderer.invoke('audit-create-action', request),
+  auditUpdateAction: request => ipcRenderer.invoke('audit-update-action', request),
+  auditOpenPdf: id => ipcRenderer.invoke('audit-open-pdf', id),
+  auditReanalyzeDocument: request => ipcRenderer.invoke('audit-reanalyze-document', request)
 });
