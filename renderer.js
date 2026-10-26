@@ -372,8 +372,8 @@ function createReviewFeedback(analysis) {
   const section = el('div', 'review-feedback');
   section.appendChild(el('h4', '', 'Human Review Outcome'));
   section.appendChild(el('p', 'small-note', 'Your assessment is stored separately from the automated QA status. Paper-confirmed outcomes require an actual comparison with the paper source.'));
-  if (!/^[0-9a-f]{64}$/i.test(String(hash || ''))) {
-    section.appendChild(el('p', 'small-note', 'A file hash was not available; this result cannot be saved to the review log.'));
+  if (!analysis.workspaceDocumentId && !/^[0-9a-f]{64}$/i.test(String(hash || ''))) {
+    section.appendChild(el('p', 'small-note', 'No indexed case ID or file hash is available for saving this review.'));
     return section;
   }
   const selector = el('select', 'review-outcome-select');
