@@ -299,9 +299,8 @@ def list_documents(db, a):
     total = db.execute("SELECT count(*) " + query, params).fetchone()[0]
     rows = db.execute("""SELECT d.id,d.project_id,d.display_name,d.page_count,d.qa_status,
       d.analyzed_at,d.revision,d.review_outcome,d.comparison_basis,d.reviewed_at,
-      (SELECT group_concat(code, ', ') FROM
-         (SELECT DISTINCT f.code code FROM findings f WHERE f.document_id=d.id AND f.kind='review'
-          ORDER BY f.code LIMIT 5)) finding_codes,
+      (SELECT group_concat(DISTINCT f.code) FROM findings f
+         WHERE f.document_id=d.id AND f.kind='review') finding_codes,
       (SELECT count(*) FROM corrective_actions a WHERE a.document_id=d.id AND a.status='open') open_actions
       """ + query + " ORDER BY CASE d.qa_status WHEN 'analysis-failed' THEN 0 WHEN 'review-required' THEN 1 ELSE 2 END, d.id DESC LIMIT ? OFFSET ?",
       [*params, limit, (page-1)*limit])
