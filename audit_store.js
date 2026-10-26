@@ -102,8 +102,12 @@ class AuditStore {
   reviewDocument(documentId, outcome, reviewerLabel = '') {
     return this.call('reviewDocument', { documentId, outcome, reviewerLabel });
   }
-  createAction(documentId, kind) { return this.call('createAction', { documentId, kind }); }
-  updateAction(actionId, status) { return this.call('updateAction', { actionId, status }); }
+  createAction(documentId, kind, reviewerLabel = '') {
+    return this.call('createAction', { documentId, kind, reviewerLabel });
+  }
+  updateAction(actionId, status, reviewerLabel = '') {
+    return this.call('updateAction', { actionId, status, reviewerLabel });
+  }
   exportQueue(projectId, destination) { return this.call('exportQueue', { projectId, destination }); }
   backupDatabase(destination) { return this.call('backupDatabase', { destination }); }
 
