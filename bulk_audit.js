@@ -9,6 +9,7 @@ const CloudScanAnalyzer = require('./cloud_analyzer');
 const { recordUsage, recordRun, usageCost } = require('./cost_tracker');
 const { evidenceReport } = require('./evidence_report');
 const { AuditStore } = require('./audit_store');
+const { applyRecordAssociation } = require('./record_association');
 const pdfParse = require('pdf-parse');
 
 const MODES = new Set(['local', 'tiered', 'astra']);
@@ -177,7 +178,7 @@ async function runBulkAudit({
     inventory = await inspectBulkFolder({ root: normalizedRoot, cancellation, onProgress, readPageCount });
   }
   if (inventory.canceled) return { ...inventory, stopped: true, processed: 0, skippedFromCheckpoint: 0,
-    reviewRequired: 0, analysisFailed: 0, pagesProcessed: 0, meteredSpendUSD: 0 };
+    reviewRequired: 0, associationReviewRequired: 0, analysisFailed: 0, pagesProcessed: 0, meteredSpendUSD: 0 };
   const auditStore = store || new AuditStore(userData);
   const auditProject = await auditStore.upsertProject(normalizedRoot, mode, 'folder');
   const runId = crypto.randomUUID();
@@ -228,12 +229,16 @@ async function runBulkAudit({
         // Never emit file path or provider error messages: may contain PHI.
         result = { analysis: { qaAssessment: { status: 'analysis-failed', findings: [] } } };
       }
+      applyRecordAssociation(result, pdfPath, normalizedRoot);
       const status = result?.analysis?.qaAssessment?.status;
       const safeStatus = ['passed', 'review-required', 'analysis-failed'].includes(status) ? status : 'analysis-failed';
       counters.processed += 1;
       if (safeStatus === 'passed') counters.passed += 1;
       else if (safeStatus === 'review-required') counters.reviewRequired += 1;
       else counters.analysisFailed += 1;
+      if (result?.analysis?.recordAssociation?.status === 'needs-review') {
+        counters.associationReviewRequired += 1;
+      }
       counters.pagesProcessed += Number(result?.analysis?.fileInformation?.totalPages) || 0;
       counters.meteredSpendUSD = meteredSpendUSD;
 

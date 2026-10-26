@@ -24,6 +24,9 @@ const FINDING_LABELS = Object.freeze({
   UNRESOLVED_PAGE: 'Page relationship needs review',
   UNCERTAIN_IDENTIFIER: 'Uncertain patient identifier',
   MULTIPLE_PATIENT_IDENTIFIERS: 'Multiple patient identifiers',
+  REGISTRATION_DISCREPANCY: 'Registration number differs from patient folder',
+  PATIENT_NAME_DISCREPANCY: 'Patient name differs from patient folder',
+  CONFLICTING_PATIENT_NAMES: 'Different patient names repeated across pages',
   DATE_ANOMALY: 'Date inconsistency',
   EXACT_DUPLICATE: 'Duplicate page detected',
   POSSIBLE_DUPLICATE: 'Possible duplicate page'

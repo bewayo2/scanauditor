@@ -239,7 +239,7 @@ function createIssuesTable(issues) {
   for (const issue of issues) {
     const row = el('tr');
     row.append(
-      el('td', '', issue.issueType || ''),
+      el('td', '', findingLabel(String(issue.issueType || '').trim().replace(/\s+/g, '_'))),
       el('td', '', issue.count ?? ''),
       el('td', '', issue.pagesAffected || ''),
       el('td', '', issue.description || '')
@@ -381,6 +381,9 @@ function createReviewFeedback(analysis) {
     ['', 'Select a review outcome'],
     ['no-defect-digital', 'No digitization defect seen — digital inspection'],
     ['model-false-positive', 'Suspected model false positive — digital inspection'],
+    ['folder-match-verified', 'Folder registration / patient identity verified — digital comparison'],
+    ['folder-mismatch-confirmed', 'Folder registration mismatch confirmed — digital comparison'],
+    ['identity-ocr-false-positive', 'Identity mismatch was an OCR error — digital comparison'],
     ['source-issue-confirmed', 'Source-paper issue confirmed — paper compared'],
     ['scan-defect-confirmed', 'Scanning defect confirmed — paper compared'],
     ['inconclusive', 'Inconclusive — further review needed']
@@ -446,7 +449,86 @@ function createRecommendations(analysis) {
   return section;
 }
 
-function createResultCard(result) {
+function createActionableSummary(analysis) {
+  const qa = analysis.qaAssessment || {};
+  const findings = Array.isArray(qa.findings) ? qa.findings : [];
+  const box = el('section', 'priority-review-panel');
+  box.appendChild(el('h4', '', 'Audit Findings — What needs attention?'));
+  const association = analysis.recordAssociation || {};
+  const overallRequiresAttention = qa.status !== 'passed' ||
+    association.status === 'needs-review';
+  box.appendChild(el('p', 'priority-lead',
+    overallRequiresAttention ? 'Overall audit: REVIEW REQUIRED' : 'Overall audit: NO FINDING REQUIRING REVIEW'));
+  if (association.status === 'needs-review') {
+    box.classList.add('priority-review');
+    box.appendChild(el('p', 'priority-lead',
+      'Document preparation / patient association: possible wrong-patient record or filing mismatch.'));
+    const list = el('ul', 'priority-findings');
+    for (const issue of association.flags || []) {
+      const row = el('li', 'priority-finding');
+      row.append(
+        el('strong', '', findingLabel(issue.code)),
+        el('span', 'priority-page-reference', 'PDF pages: ' + (issue.pages || []).join(', ')),
+        el('p', '', issue.reason || 'Compare repeated patient identifiers with the registration folder.'));
+      list.appendChild(row);
+    }
+    box.appendChild(list);
+    box.appendChild(el('p', 'priority-context',
+      'The patient folder is the reference. This check uses repeated, explicitly labeled fields across the whole PDF; possible OCR variations stay informational. ' +
+      'This is a record-association concern, not evidence of a defective scan.'));
+  } else if (association.status === 'uncertain') {
+    box.appendChild(el('p', 'priority-context',
+      'Some patient-registration readings differ weakly from the folder and may be OCR artifacts. No strong mismatch was established.'));
+  }
+  if (qa.status === 'passed') {
+    if (!overallRequiresAttention) box.classList.add('priority-clear');
+    box.appendChild(el('p', 'priority-lead',
+      association.status === 'needs-review'
+        ? 'Scan quality passed. Record identity / folder association still needs investigation.'
+        : 'No material scanning defect detected by automated QA. No defect-driven manual review is required.'));
+    box.appendChild(el('p', 'priority-context',
+      'This does not prove every paper page was scanned, confirm patient identity, or authorize disposal. Optional spot-check sampling remains available.'));
+  } else if (qa.status === 'analysis-failed') {
+    box.classList.add('priority-unknown');
+    box.appendChild(el('p', 'priority-lead',
+      'Automated analysis was incomplete. Reanalyze this record or investigate the failed pages.'));
+  } else if (findings.length) {
+    box.classList.add('priority-review');
+    box.appendChild(el('p', 'priority-lead',
+      'Scan fidelity: ' + findings.length + ' potential material scanning problem(s) need checking.'));
+    const list = el('ul', 'priority-findings');
+    for (const finding of findings) {
+      const item = el('li', 'priority-finding');
+      const heading = el('strong', '', findingLabel(finding.code || 'UNCLASSIFIED'));
+      const pages = Array.isArray(finding.pages) ? finding.pages.filter(Number.isInteger) : [];
+      const location = pages.length ? 'PDF page' + (pages.length === 1 ? ' ' : 's ') + pages.join(', ') : 'Entire record';
+      item.append(heading, el('span', 'priority-page-reference', location),
+        el('p', '', finding.message || 'Review the original PDF and compare with the paper when indicated.'));
+      list.appendChild(item);
+    }
+    box.appendChild(list);
+    box.appendChild(el('p', 'priority-context',
+      'Inspect these pages in the original PDF. Confirm a digitization defect before requesting a rescan.'));
+  } else {
+    box.appendChild(el('p', 'priority-lead',
+      'The scan requires attention; see the processing details below.'));
+  }
+  if (qa.policyReclassified) {
+    box.appendChild(el('p', 'priority-context',
+      'This case was reclassified under the updated material-defect policy without rescanning. ' +
+      'The original scan evidence and any manual review history have been retained.'));
+  }
+  const context = Array.isArray(qa.informationalFindings) ? qa.informationalFindings : [];
+  if (context.length) {
+    const categories = new Set(context.map(item => item.code)).size;
+    box.appendChild(el('p', 'priority-context',
+      categories + ' informational observation type(s) are available in the full report. ' +
+      'They are not evidence of material scan loss and do not require review by themselves.'));
+  }
+  return box;
+}
+
+function createResultCard(result, options = {}) {
   const analysis = result.analysis || {};
   const qa = analysis.qaAssessment || { status: 'analysis-failed', reason: 'No QA result available.' };
   const coverage = analysis.identifierCoverage || {};
@@ -456,55 +538,85 @@ function createResultCard(result) {
   const header = el('div', 'result-header');
   header.append(
     el('div', 'result-filename', analysis.fileInformation?.fileName || result.filename || 'Unknown'),
-    el('div', `result-status ${qaClass(qa.status)}`, qaLabel(qa.status))
+    el('div', 'result-status ' + qaClass(qa.status), qaLabel(qa.status))
   );
   card.appendChild(header);
+  if (!options.priorityShownSeparately) card.appendChild(createActionableSummary(analysis));
+  if (qa.status === 'review-required' || qa.status === 'analysis-failed' ||
+      analysis.recordAssociation?.status === 'needs-review') {
+    card.appendChild(createReviewFeedback(analysis));
+  } else {
+    const optional = el('details', 'optional-human-review');
+    optional.appendChild(el('summary', '', 'Optional human spot-check / review outcome'));
+    optional.appendChild(createReviewFeedback(analysis));
+    card.appendChild(optional);
+  }
 
+  const full = el('details', 'full-analysis-details');
+  full.appendChild(el('summary', '', 'Full Analysis Details — page findings, identifiers and diagnostics'));
+  const inner = el('div', 'full-analysis-inner');
   const details = el('div', 'result-details');
   details.append(
     createDetail('Total Pages', analysis.fileInformation?.totalPages ?? 0),
     createDetail('Internal PDF Pagination', analysis.internalCompleteness?.status || 'Not assessed'),
     createDetail('Content Preservation', analysis.contentPreservation?.status || 'Not assessed'),
-    createDetail('Identifier Coverage', Number.isFinite(coverage.coveragePercentage) ? `${coverage.coveragePercentage.toFixed(1)}%` : '0.0%'),
+    createDetail('Identifier Coverage (not scan quality)', Number.isFinite(coverage.coveragePercentage) ? analysis.identifierCoverage.coveragePercentage.toFixed(1) + '%' : '0.0%'),
     createDetail('Continuation Pages', Array.isArray(linkage.continuationPages) ? linkage.continuationPages.length : 0),
     createDetail('Document Start Pages', Array.isArray(linkage.documentStartPages) ? linkage.documentStartPages.length : 0),
-    createDetail('Unresolved Pages', Array.isArray(linkage.unresolvedPages) ? linkage.unresolvedPages.length : 0),
+    createDetail('Unresolved Pages (informational)', Array.isArray(linkage.unresolvedPages) ? linkage.unresolvedPages.length : 0),
     createDetail('Pages Failed', coverage.pagesFailed ?? 0),
     createDetail('QA Status', qaLabel(qa.status))
   );
-  card.appendChild(details);
+  inner.appendChild(details);
 
   const reason = el('div', 'finding-section');
   reason.append(el('h5', '', 'Automated QA Assessment'), el('div', 'finding-item', qa.reason || 'No assessment reason available.'));
-  card.appendChild(reason);
-
+  inner.appendChild(reason);
   const preservationSummary = createPreservationSummary(analysis);
-  if (preservationSummary) card.appendChild(preservationSummary);
-
+  if (preservationSummary) inner.appendChild(preservationSummary);
+  const association = analysis.recordAssociation;
+  if (association?.basis === 'authoritative-folder') {
+    const associationBox = el('div', 'finding-section');
+    associationBox.appendChild(el('h5', '', 'Patient Folder / Record Association'));
+    associationBox.appendChild(el('p', 'small-note',
+      'The folder registration is used as the authoritative reference. The check is cautious about OCR noise, doctor names, dates and isolated differences.'));
+    if (association.expectedRegistration) associationBox.appendChild(
+      createMaskedFinding('Expected folder registration', association.expectedRegistration, '••••••'));
+    if (association.expectedName) associationBox.appendChild(
+      createMaskedFinding('Expected folder patient name', association.expectedName, '••••••'));
+    for (const issue of [...(association.flags || []), ...(association.observations || [])]) {
+      const item = el('div', 'finding-item');
+      item.append(el('strong', '', findingLabel(issue.code) + ' · pages ' + (issue.pages || []).join(', ') + ': '));
+      item.append(el('span', '', issue.reason || 'Compare identified patient fields.'));
+      associationBox.appendChild(item);
+      if (issue.observedRegistration) associationBox.appendChild(
+        createMaskedFinding('Observed registration', issue.observedRegistration, '••••••'));
+      if (issue.observedName) associationBox.appendChild(
+        createMaskedFinding('Observed patient-name candidate', issue.observedName, '••••••'));
+    }
+    inner.appendChild(associationBox);
+  }
   const identifiers = el('div', 'finding-section');
-  identifiers.appendChild(el('h5', '', 'Confirmed Patient Identifiers'));
+  identifiers.appendChild(el('h5', '', 'Patient Identifiers (OCR suggestions — not independently verified)'));
   const names = analysis.patientIdentifiers?.names || [];
   const hospitalNumbers = analysis.patientIdentifiers?.hospitalNumbers || [];
   if (!names.length && !hospitalNumbers.length) identifiers.appendChild(el('div', 'finding-item', 'No high-confidence patient identifiers were extracted.'));
-  names.forEach((name, index) => identifiers.appendChild(createMaskedFinding(`Patient name${names.length > 1 ? ` ${index + 1}` : ''}`, name, '••••••••••')));
-  hospitalNumbers.forEach((id, index) => identifiers.appendChild(createMaskedFinding(`Hospital ID${hospitalNumbers.length > 1 ? ` ${index + 1}` : ''}`, id, '••••••')));
-  card.appendChild(identifiers);
-
+  names.forEach((name, index) => identifiers.appendChild(createMaskedFinding('Patient name' + (names.length > 1 ? ' ' + (index + 1) : ''), name, '••••••••••')));
+  hospitalNumbers.forEach((id, index) => identifiers.appendChild(createMaskedFinding('Hospital ID' + (hospitalNumbers.length > 1 ? ' ' + (index + 1) : ''), id, '••••••')));
+  inner.appendChild(identifiers);
   const issues = analysis.summaryTable || [];
-  if (issues.length) card.appendChild(createIssuesTable(issues));
-  else card.appendChild(el('div', 'finding-item positive', 'No configured automated QA finding requires manual review.'));
-
+  if (issues.length) inner.appendChild(createIssuesTable(issues));
+  else inner.appendChild(el('div', 'finding-item positive', 'No material scan-fidelity finding requires manual review.'));
   const informational = analysis.informationalTable || [];
-  if (informational.length) card.appendChild(createInformationalTable(informational));
-
+  if (informational.length) inner.appendChild(createInformationalTable(informational));
   const diagnostics = createModelDiagnostics(analysis);
-  if (diagnostics) card.appendChild(diagnostics);
+  if (diagnostics) inner.appendChild(diagnostics);
   const qualityEvidence = createQualityEvidence(analysis);
-  if (qualityEvidence) card.appendChild(qualityEvidence);
-
+  if (qualityEvidence) inner.appendChild(qualityEvidence);
   const recommendations = createRecommendations(analysis);
-  if (recommendations) card.appendChild(recommendations);
-  card.appendChild(createReviewFeedback(analysis));
+  if (recommendations) inner.appendChild(recommendations);
+  full.appendChild(inner);
+  card.appendChild(full);
   return card;
 }
 
@@ -603,6 +715,7 @@ function renderBulkProgress(progress) {
   byId('bulk-processed').textContent = fmt(processed);
   byId('bulk-skipped').textContent = fmt(progress.skippedFromCheckpoint);
   byId('bulk-review').textContent = fmt(progress.reviewRequired);
+  byId('bulk-identity-review').textContent = fmt(progress.associationReviewRequired);
   byId('bulk-failed').textContent = fmt(progress.analysisFailed);
   byId('bulk-pages-done').textContent = fmt(progress.pagesProcessed);
 
@@ -643,6 +756,7 @@ async function selectBulkFolder() {
     byId('bulk-processed').textContent = '0';
     byId('bulk-skipped').textContent = '0';
     byId('bulk-review').textContent = '0';
+    byId('bulk-identity-review').textContent = '0';
     byId('bulk-failed').textContent = '0';
     bulkPreviewing = true;
     byId('bulk-start').disabled = true;
@@ -695,7 +809,7 @@ async function startBulkAudit() {
   analysisMode.disabled = true;
   renderBulkProgress({
     ...bulkInventory, phase: 'running', processed: 0, pagesProcessed: 0,
-    skippedFromCheckpoint: 0, reviewRequired: 0, analysisFailed: 0,
+    skippedFromCheckpoint: 0, reviewRequired: 0, associationReviewRequired: 0, analysisFailed: 0,
     filesSeen: 0, sessionTarget: Math.min(maxFiles, bulkInventory.filesTotal)
   });
   try {
@@ -785,7 +899,7 @@ async function refreshAuditProjects(preferredId = null) {
   await refreshFindingTypes(selector.value);
   if (preferredId) {
     auditQueueState.page = 1;
-    byId('audit-status-filter').value = 'review-required';
+    byId('audit-status-filter').value = 'attention';
     byId('audit-review-filter').value = 'pending';
   }
   await refreshAuditQueue();
@@ -810,13 +924,15 @@ async function refreshAuditQueue() {
   if (!data.rows.length) {
     const tr = document.createElement('tr');
     const cell = queueCell(tr, 'No documents match the selected filters.');
-    cell.colSpan = 7;
+    cell.colSpan = 8;
     tbody.appendChild(tr);
   }
   for (const item of data.rows) {
     const tr = document.createElement('tr');
     queueCell(tr, item.display_name);
     queueCell(tr, item.page_count);
+    queueCell(tr, item.overall_audit_status === 'review-required'
+      ? 'REVIEW REQUIRED' : 'No review finding');
     queueCell(tr, qaLabel(item.qa_status));
     queueCell(tr, item.finding_codes
       ? item.finding_codes.split(',').map(code => findingLabel(code.trim())).join('; ')
@@ -835,10 +951,13 @@ async function refreshAuditQueue() {
   }
   byId('audit-case-total').textContent =
     queueFormat(summary.documents) + ' records · ' + queueFormat(summary.pages) +
-    ' pages · ' + queueFormat(summary.pending_review) + ' awaiting review';
+    ' pages · ' + queueFormat(summary.overall_review_required) +
+    ' records with audit findings · ' + queueFormat(summary.pending_review) +
+    ' awaiting review';
   byId('audit-queue-stats').textContent = queueFormat(summary.passed) +
     ' passed automated QA · ' + queueFormat(summary.review_required) +
-    ' review-required · ' + queueFormat(summary.analysis_failed) +
+    ' material scan reviews · ' + queueFormat(summary.association_review) +
+    ' document preparation / identity findings · ' + queueFormat(summary.analysis_failed) +
     ' analysis failed · ' + queueFormat(summary.reviewed) + ' manual reviews recorded';
   const pages = Math.max(1, Math.ceil(data.total / data.limit));
   byId('audit-page-label').textContent = 'Page ' + data.page + ' of ' + pages +
@@ -912,7 +1031,8 @@ async function openAuditDocument(documentId) {
   analysis.workspaceDocumentId = record.id;
   analysis.manualDisposition = record.review_outcome
     ? { outcome: record.review_outcome, comparisonBasis: record.comparison_basis } : null;
-  byId('audit-record-content').replaceChildren(createResultCard({ analysis }));
+  byId('audit-record-priority').replaceChildren(createActionableSummary(analysis));
+  byId('audit-record-content').replaceChildren(createResultCard({ analysis }, { priorityShownSeparately: true }));
   renderAuditHistory(record);
   detail.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -1236,6 +1356,7 @@ byId('audit-open-pdf').addEventListener('click', async () => {
   try { await window.electronAPI.auditOpenPdf(auditQueueState.detailId); }
   catch (_) { showNotification('Original PDF is unavailable or could not be opened.', 'error'); }
 });
+byId('audit-identity-task').addEventListener('click', () => auditAction('investigation'));
 byId('audit-rescan-task').addEventListener('click', () => auditAction('rescan'));
 byId('audit-paper-task').addEventListener('click', () => auditAction('paper-comparison'));
 byId('audit-reanalyze').addEventListener('click', reanalyzeSelectedCase);

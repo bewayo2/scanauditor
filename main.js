@@ -17,6 +17,7 @@ const reviewDispositions = require('./review_dispositions');
 const { evidenceReport } = require('./evidence_report');
 const { runBulkAudit, inspectBulkFolder } = require('./bulk_audit');
 const { AuditStore } = require('./audit_store');
+const { applyRecordAssociation } = require('./record_association');
 
 let mainWindow;
 // In-memory only. Never save or log the hospital's API key.
@@ -308,6 +309,7 @@ ipcMain.handle('audit-reanalyze-document', async (_event, request) => {
     } catch (_) {
       result = failureResult(source, new Error('Analysis failed; see the QA result.'));
     }
+    applyRecordAssociation(result, source, path.dirname(path.dirname(path.dirname(source))));
     const saved = await workspace.saveDocument(record.project_id, source, result, runId);
     await writeAuditRecord(result);
     await costTracker.recordRun(app.getPath('userData'), {
@@ -388,7 +390,9 @@ ipcMain.handle('audit-export-evidence', async (_event, documentId) => {
     filters: [{ name: 'QA evidence JSON', extensions: ['json'] }]
   });
   if (chosen.canceled || !chosen.filePath) return { canceled: true };
-  await fs.writeJson(chosen.filePath, record.evidence, { spaces: 2 });
+  // Historical evidence snapshots retain their original QA classification;
+  // export the current policy assessment with a newly calculated digest.
+  await fs.writeJson(chosen.filePath, evidenceReport({ analysis: record.analysis }), { spaces: 2 });
   return { saved: true };
 });
 ipcMain.handle('audit-open-pdf', async (_event, documentId) => {
@@ -490,6 +494,7 @@ ipcMain.handle('analyze-files', async (_event, request) => {
     }
     // Individual and folder results use the same indexed case record format.
     if (typeof requestedPath === 'string' && path.extname(requestedPath).toLowerCase() === '.pdf') {
+      applyRecordAssociation(result, requestedPath, path.dirname(path.dirname(path.resolve(requestedPath))));
       const saved = await workspace.saveDocument(individualProject.id, requestedPath, result, runId);
       if (result?.analysis) result.analysis.workspaceDocumentId = saved.id;
     }

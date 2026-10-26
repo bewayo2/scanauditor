@@ -34,7 +34,7 @@ test('queue uses server pagination, filters, a single-case viewer and manual act
   }
   assert.match(renderer, /limit: 50/);
   assert.match(renderer, /window\.electronAPI\.auditListDocuments\(params\)/);
-  assert.match(renderer, /createResultCard\(\{ analysis \}\)/);
+  assert.match(renderer, /createResultCard\(\{ analysis \}, \{ priorityShownSeparately: true \}\)/);
   assert.match(renderer, /window\.electronAPI\.auditCreateAction/);
   assert.match(renderer, /window\.electronAPI\.auditOpenPdf/);
   assert.match(renderer, /window\.electronAPI\.auditReanalyzeDocument/);

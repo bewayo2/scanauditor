@@ -1074,6 +1074,41 @@ body {
     color: #45546c;
 }
 
+/* Action-first, material scan-defect review. Technical findings are collapsed. */
+.priority-review-panel {
+  padding: 18px 20px; margin: 12px 0 20px;
+  border-radius: 12px; border: 2px solid #b7c6da;
+  background: #f2f6fb; color: #25364e;
+}
+.priority-review-panel h4 { font-size: 19px; color: #263c58; margin: 0 0 12px; }
+.priority-review-panel.priority-clear { background: #eff9f2; border-color: #78b98c; }
+.priority-review-panel.priority-review { background: #fff7eb; border-color: #d8a75d; }
+.priority-review-panel.priority-unknown { background: #fff2f2; border-color: #ca8989; }
+.priority-review-panel .priority-lead { font-size: 17px; line-height: 1.55; font-weight: 700; color: #263747; }
+.priority-review-panel .priority-context { margin-top: 8px; font-size: 14px; color: #42536b; line-height: 1.6; }
+.priority-findings { margin: 10px 0 4px; padding: 0; list-style: none; display: grid; gap: 10px; }
+.priority-finding {
+  padding: 13px; border-radius: 8px; background: #fff;
+  border: 1px solid #d8dfe9; display: grid; gap: 6px;
+}
+.priority-finding strong { font-size: 16px; color: #263747; }
+.priority-finding p { font-size: 14px; color: #435268; margin: 0; }
+.priority-page-reference { font-size: 13px; color: #493474; font-weight: 700; }
+.full-analysis-details, .optional-human-review {
+  margin: 15px 0; border: 1px solid #cfd9e7;
+  border-radius: 9px; padding: 12px 15px; background: #fff;
+}
+.full-analysis-details > summary, .optional-human-review > summary {
+  cursor: pointer; font-size: 15px; font-weight: 700; color: #273d5b;
+}
+.full-analysis-details > summary:focus-visible, .optional-human-review > summary:focus-visible {
+  outline: 3px solid #425ba3; outline-offset: 4px;
+}
+.full-analysis-inner { padding-top: 16px; }
+.review-feedback { margin: 12px 0; }
+.review-feedback .small-note { color: #45566c; }
+.audit-record-detail > .audit-detail-actions { margin: 14px 0; }
+
 /* Human scan-quality review feedback (recorded without PHI). */
 .review-feedback {
     margin: 20px 0 4px;

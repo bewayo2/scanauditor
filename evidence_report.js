@@ -77,6 +77,19 @@ function evidenceReport(result) {
         materialLossSuspected: Boolean(x.materialLossSuspected)
       }))
     },
+    recordAssociation: {
+      status: ['needs-review', 'matched', 'unconfirmed', 'uncertain', 'not-configured'].includes(
+        analysis.recordAssociation?.status) ? analysis.recordAssociation.status : 'not-assessed',
+      basis: analysis.recordAssociation?.basis === 'authoritative-folder'
+        ? 'authoritative-folder' : 'not-evaluated',
+      findings: (analysis.recordAssociation?.flags || []).map(item => ({
+        code: safeCode(item.code), pages: pagesOf(item), confidence: item.confidence
+      })),
+      observations: (analysis.recordAssociation?.observations || []).map(item => ({
+        code: safeCode(item.code), pages: pagesOf(item), confidence: item.confidence
+      }))
+      // No registration numbers, patient names, folder names or source paths.
+    },
     pageDiagnostics: pageStates,
     // Only numeric/categorical quality evidence; no excerpts or identifiers.
     qualityEvidence: (quality.qualityEvidence || []).map(x => ({
