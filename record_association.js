@@ -133,7 +133,7 @@ function evaluateRecordAssociation(sourcePath, root, mentions = [], options = {}
       reason: corroboratedOneDigitConflict
         ? 'A one-digit alternate registration consistently predominates across labeled pages; verify against the folder.'
         : differences <= 1
-          ? 'Isolated or minority one-digit variation; likely OCR uncertainty unless other identity evidence disagrees.'
+          ? 'Possible single-character OCR variation; a minority one-digit reading is not independently a folder mismatch.'
           : pdfPageCount === 1
             ? 'The single-page PDF contains a clearly labeled registration materially different from its patient folder.'
             : pages.length < 2 ? 'Isolated different registration number; could refer to another record or OCR.'
