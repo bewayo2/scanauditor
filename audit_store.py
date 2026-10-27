@@ -373,13 +373,24 @@ def save_document(db, a):
     stamp = now()
     run_id = a.get("runId") if valid_string(a.get("runId"), 100) else None
     file_key = a.get("fileKey") if valid_string(a.get("fileKey"), 128) else None
+    current_findings = extract_findings(analysis)
+    current_material = {(code, page) for code, page, kind in current_findings if kind == "review"}
     with db:
-        previous = db.execute("SELECT id,revision,file_sha256,review_outcome FROM documents WHERE project_id=? AND source_path=?",
+        previous = db.execute("SELECT id,revision,file_sha256,review_outcome,qa_status,association_status FROM documents WHERE project_id=? AND source_path=?",
                               (project_id, source)).fetchone()
         revision = previous["revision"] + 1 if previous else 1
-        # Review outcomes are invalidated only when contents are provably changed,
-        # or where no hash can establish sameness. Event history is never deleted.
-        preserve_review = bool(previous and file_hash and previous["file_sha256"] == file_hash)
+        # Preserve human review only when the PDF and the material automated
+        # findings are unchanged. Prior review events remain in history.
+        preserve_review = False
+        if previous and file_hash and previous["file_sha256"] == file_hash:
+            prior_material = {(row["code"], row["page_number"]) for row in db.execute(
+                "SELECT code,page_number FROM findings WHERE document_id=? AND kind='review'",
+                (previous["id"],))}
+            preserve_review = (
+                previous["qa_status"] == status
+                and previous["association_status"] == association_status
+                and prior_material == current_material
+            )
         if previous:
             db.execute("""UPDATE documents SET display_name=?,file_key=?,file_sha256=?,page_count=?,
               qa_status=?,association_status=?,analyzed_at=?,run_id=?,analysis_json=?,evidence_json=?,revision=?,
@@ -402,7 +413,7 @@ def save_document(db, a):
                association_status,stamp, run_id, json.dumps(analysis), json.dumps(evidence), revision))
             document_id = cursor.lastrowid
         db.executemany("INSERT INTO findings(document_id,code,page_number,kind) VALUES (?,?,?,?)",
-                       ((document_id, code, page, kind) for code, page, kind in extract_findings(analysis)))
+                       ((document_id, code, page, kind) for code, page, kind in current_findings))
         db.execute("""INSERT INTO document_runs
           (document_id,run_id,analyzed_at,status,page_count,input_sha256,evidence_json,revision)
           VALUES (?,?,?,?,?,?,?,?)""",
