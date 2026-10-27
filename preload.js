@@ -24,6 +24,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('bulk-progress', listener);
     return () => ipcRenderer.removeListener('bulk-progress', listener);
   },
+  onScanProgress: callback => {
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on('scan-progress', listener);
+    return () => ipcRenderer.removeListener('scan-progress', listener);
+  },
   setOpenAIKey: key => ipcRenderer.invoke('set-openai-key', key),
   clearOpenAIKey: () => ipcRenderer.invoke('clear-openai-key'),
   getOpenAIKeyStatus: () => ipcRenderer.invoke('get-openai-key-status'),
