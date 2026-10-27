@@ -52,7 +52,7 @@
       <section class="file-section" aria-labelledby="bulk-heading">
         <div class="section-header">
           <h2 id="bulk-heading">Resumable Folder Audit</h2>
-          <p>Process a folder tree one PDF at a time. Results and checkpoints are kept locally without storing patient names, OCR text, or source filenames. Re-select the same folder and mode to resume.</p>
+          <p>Process a folder tree one PDF at a time. The private review database retains record details and local filenames, while resumable checkpoints and PHI-minimized evidence exclude patient names and filenames. Re-select the same folder and mode to resume.</p>
         </div>
         <div class="file-actions">
           <button id="bulk-folder" class="btn btn-secondary" type="button">Select PDF Folder</button>
@@ -104,7 +104,7 @@
       <section class="file-section audit-workspace" id="audit-workspace" aria-labelledby="workspace-heading">
         <div class="section-header">
           <h2 id="workspace-heading">Audit Projects &amp; Review Queue</h2>
-          <p>All folder and individual scans are indexed here. Open only the cases needing attention, view the original PDF, record manual decisions, and manage rescans or paper comparison.</p>
+          <p>All folder and individual scans are indexed here. Inspect the scanned PDF, record your review decision, and optionally recommend follow-up.</p>
         </div>
         <div class="audit-queue-toolbar">
           <div><label for="audit-project">Audit project</label><select id="audit-project"><option value="">Loading projects…</option></select></div>
@@ -189,7 +189,7 @@
             <strong id="reanalyze-progress-label">Reanalyzing PDF…</strong>
             <progress id="reanalyze-progress-bar" max="100" value="0" aria-label="Reanalysis page progress"></progress>
           </div>
-          <p class="small-note">The original PDF opens in the workstation's PDF viewer. Automated QA findings remain separate from human decisions. Do not mark a paper comparison unless the original paper was actually inspected.</p>
+          <p class="small-note">The scanned PDF opens in the workstation's PDF viewer. Automated QA findings remain separate from human decisions. Do not mark a paper comparison unless the original paper was actually inspected.</p>
           <div id="audit-record-actions"></div>
           <div id="audit-record-history"></div>
         </section>
