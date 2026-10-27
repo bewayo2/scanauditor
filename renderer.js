@@ -63,6 +63,12 @@ function showLoading(show) {
   analyzeFilesBtn.disabled = show;
   selectFilesBtn.disabled = show;
   clearFilesBtn.disabled = show;
+  if (show) {
+    byId('loading-progress-label').textContent = 'Preparing the selected PDF…';
+    byId('loading-progress-bar').removeAttribute('value');
+    byId('individual-progress').hidden = false;
+    byId('individual-progress-bar').removeAttribute('value');
+  }
 }
 
 function addFiles(files) {
@@ -154,8 +160,14 @@ async function analyzeSelectedFiles() {
     });
     analysisResults = Array.isArray(response?.results) ? response.results : [];
     displayResults();
-    showNotification(`Automated QA completed for ${analysisResults.length} file(s).`, 'success');
-    refreshAuditProjects().catch(() => {});
+    byId('audit-status-filter').value = 'all';
+    byId('audit-review-filter').value = 'all';
+    await refreshAuditProjects(response?.projectId);
+    byId('audit-status-filter').value = 'all';
+    byId('audit-review-filter').value = 'all';
+    await refreshAuditQueue();
+    byId('audit-workspace').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    showNotification(`Automated QA completed for ${analysisResults.length} file(s). Open a record in the review queue.`, 'success');
   } catch (error) {
     showNotification(`Automated QA failed: ${error.message}`, 'error');
   } finally {
@@ -198,9 +210,9 @@ function displayResults() {
   );
   resultsSummary.appendChild(summary);
 
-  analysisResults.forEach(result => resultsDetails.appendChild(createResultCard(result)));
+  // All findings and human decisions live in the indexed Review Queue.
+  // Avoid a competing per-file review interface below the audit workspace.
   resultsSection.style.display = 'block';
-  resultsSection.scrollIntoView({ behavior: 'smooth' });
 }
 
 function createDetail(label, value, extraClass = '') {
@@ -377,15 +389,24 @@ function createReviewFeedback(analysis) {
     return section;
   }
   const selector = el('select', 'review-outcome-select');
+  const hasScanConcern = analysis.qaAssessment?.status === 'review-required';
+  const hasIdentityConcern = analysis.recordAssociation?.status === 'needs-review';
+  const hasFolderReference = analysis.recordAssociation?.basis === 'authoritative-folder';
   const options = [
     ['', 'Select a review outcome'],
     ['no-defect-digital', 'No digitization defect seen — digital inspection'],
-    ['model-false-positive', 'Suspected model false positive — digital inspection'],
-    ['folder-match-verified', 'Folder registration / patient identity verified — digital comparison'],
-    ['folder-mismatch-confirmed', 'Folder registration mismatch confirmed — digital comparison'],
-    ['identity-ocr-false-positive', 'Identity mismatch was an OCR error — digital comparison'],
-    ['source-issue-confirmed', 'Source-paper issue confirmed — paper compared'],
-    ['scan-defect-confirmed', 'Scanning defect confirmed — paper compared'],
+    ...(hasScanConcern ? [
+      ['model-false-positive', 'Suspected model false positive — digital inspection'],
+      ['source-issue-confirmed', 'Source-paper issue confirmed — paper compared'],
+      ['scan-defect-confirmed', 'Scanning defect confirmed — paper compared']
+    ] : []),
+    ...(hasIdentityConcern || hasFolderReference ? [
+      ['folder-match-verified', 'Folder registration / patient identity verified — digital comparison'],
+      ...(hasIdentityConcern ? [
+        ['folder-mismatch-confirmed', 'Folder registration mismatch confirmed — digital comparison'],
+        ['identity-ocr-false-positive', 'Identity mismatch was an OCR error — digital comparison']
+      ] : [])
+    ] : []),
     ['inconclusive', 'Inconclusive — further review needed']
   ];
   for (const [value, label] of options) {
@@ -393,11 +414,12 @@ function createReviewFeedback(analysis) {
     option.value = value;
     selector.appendChild(option);
   }
-  const reviewer = el('input', 'review-outcome-select');
-  reviewer.type = 'text';
-  reviewer.maxLength = 120;
-  reviewer.placeholder = 'Reviewer name or staff ID (not authenticated)';
-  reviewer.setAttribute('aria-label', 'Reviewer name or staff ID (not authenticated)');
+  const fallbackReviewer = el('input', 'review-outcome-select');
+  fallbackReviewer.type = 'text';
+  fallbackReviewer.maxLength = 120;
+  fallbackReviewer.placeholder = 'Reviewer name or staff ID (not authenticated)';
+  fallbackReviewer.setAttribute('aria-label', 'Reviewer name or staff ID (not authenticated)');
+  const reviewer = analysis.workspaceDocumentId ? byId('audit-action-reviewer') : fallbackReviewer;
   const save = el('button', 'btn btn-secondary', 'Save Review Outcome');
   save.type = 'button';
   const feedback = el('p', 'small-note', 'No human review outcome recorded for this file.');
@@ -427,7 +449,9 @@ function createReviewFeedback(analysis) {
       (options.find(([key]) => key === existing.outcome)?.[1] || existing.outcome) +
       ' (' + existing.comparisonBasis + ').';
   }).catch(() => {});
-  section.append(selector, reviewer, save, feedback);
+  section.appendChild(selector);
+  if (!analysis.workspaceDocumentId) section.appendChild(fallbackReviewer);
+  section.append(save, feedback);
   return section;
 }
 
@@ -638,6 +662,54 @@ let bulkPreviewing = false;
 let bulkRunning = false;
 let bulkInventory = null;
 
+// Page-level progress is independent of the folder's completed-file bar.
+// Preparing page images and final record checks are indeterminate; never
+// imply that a large PDF is fully analyzed simply because OCR reached 100%.
+function renderPageStage(labelId, barId, progress, prefix = '') {
+  const label = byId(labelId);
+  const bar = byId(barId);
+  const total = Number.isSafeInteger(progress?.totalPages) && progress.totalPages > 0
+    ? progress.totalPages : null;
+  const done = Number.isSafeInteger(progress?.completedPages)
+    ? Math.max(0, Math.min(progress.completedPages, total || 0)) : 0;
+  const stage = progress?.stage;
+  let message;
+  switch (stage) {
+    case 'opening-file': message = 'Opening scanned PDF…'; break;
+    case 'preparing-pages': message = 'Preparing ' + total + ' page images…'; break;
+    case 'converting-pages': message = 'Prepared ' + done + ' of ' + total + ' page images'; break;
+    case 'checking-images': message = 'Measuring image quality…'; break;
+    case 'reading-page': message = 'Reading page ' + (done + 1) + ' of ' + total + '…'; break;
+    case 'reading-pages': message = 'Read ' + done + ' of ' + total + ' pages'; break;
+    case 'checking-record': message = 'Checking page sequence and record structure…'; break;
+    case 'checking-quality': message = 'Checking image quality: ' + done + ' of ' + total + ' pages'; break;
+    case 'finalizing': message = 'Finalizing scan QA findings…'; break;
+    case 'file-completed':
+    case 'completed': message = 'PDF analysis completed'; break;
+    default: message = 'Processing scanned PDF…';
+  }
+  label.textContent = prefix + message;
+  if (total && ['converting-pages', 'reading-page', 'reading-pages', 'checking-quality', 'file-completed', 'completed'].includes(stage)) {
+    bar.value = Math.round(100 * done / total);
+  } else {
+    bar.removeAttribute('value');
+  }
+}
+
+function renderScanProgress(progress) {
+  if (!progress || typeof progress !== 'object') return;
+  if (progress.context === 'individual') {
+    const prefix = Number.isSafeInteger(progress.fileIndex) && progress.fileCount
+      ? 'PDF ' + (progress.fileIndex + 1) + ' of ' + progress.fileCount + ' · ' : '';
+    byId('individual-progress').hidden = false;
+    renderPageStage('individual-progress-label', 'individual-progress-bar', progress, prefix);
+    renderPageStage('loading-progress-label', 'loading-progress-bar', progress, prefix);
+  } else if (progress.context === 'reanalysis') {
+    byId('reanalyze-progress').hidden = false;
+    renderPageStage('reanalyze-progress-label', 'reanalyze-progress-bar', progress);
+  }
+}
+
 function showBulkEstimate(info) {
   const files = Number(info.filesTotal);
   if (Number.isSafeInteger(files) && files >= 0) {
@@ -672,6 +744,20 @@ function renderBulkProgress(progress) {
   const current = byId('bulk-current');
   const note = byId('bulk-progress-note');
   showBulkEstimate(progress);
+  const pageProgress = byId('bulk-page-progress');
+  if (phase === 'processing') {
+    pageProgress.hidden = false;
+    const filePrefix = 'PDF ' + Number(progress.currentFileNumber || 0).toLocaleString('en-US') +
+      ' of ' + Number(progress.filesTotal || 0).toLocaleString('en-US') + ' · ';
+    renderPageStage('bulk-page-label', 'bulk-page-progress-bar', {
+      stage: progress.currentStage || 'opening-file',
+      totalPages: progress.currentPdfPages,
+      completedPages: progress.currentPage
+    }, filePrefix);
+    byId('bulk-page-detail').textContent = 'Progress updates as each page is read. Final QA checks may continue after page reading.';
+  } else if (phase === 'completed' || phase === 'stopped' || phase === 'canceled' || phase === 'ready') {
+    pageProgress.hidden = true;
+  }
   const fmt = value => Number(value || 0).toLocaleString('en-US');
 
   if (phase === 'inventory') {
@@ -728,7 +814,7 @@ function renderBulkProgress(progress) {
   byId('bulk-phase').textContent = descriptions[phase] || 'Scanning PDFs';
   current.textContent = phase === 'processing'
     ? 'Processing PDF ' + fmt(progress.currentFileNumber) + ' of ' +
-      fmt(progress.filesTotal) + ' in this folder; page count updates when this PDF finishes.'
+      fmt(progress.filesTotal) + ' in this folder. See the live page status above.'
     : phase === 'stopped'
       ? 'Stopped after the current PDF or session limit. Re-select Start / Resume to continue.'
       : phase === 'completed'
@@ -1022,6 +1108,19 @@ function renderAuditHistory(record) {
 async function openAuditDocument(documentId) {
   const record = await window.electronAPI.auditGetDocument(documentId);
   if (!record) throw new Error('Document unavailable');
+  byId('audit-recommendations').open = false;
+  const qaNeedsReview = record.qa_status === 'review-required';
+  const identityNeedsReview = record.association_status === 'needs-review';
+  const guidance = identityNeedsReview && qaNeedsReview
+    ? 'This record has both scan-quality and identity concerns. An appropriate next step may be paper comparison or filing investigation.'
+    : identityNeedsReview
+      ? 'An identity or filing investigation may be appropriate; a rescan is not automatically indicated.'
+      : qaNeedsReview
+        ? 'A comparison with the original paper may help confirm whether scanning introduced a defect. Request a rescan only after confirming it is needed.'
+        : record.qa_status === 'analysis-failed'
+          ? 'The analysis did not complete. Reanalysis is available under advanced actions; you do not have to make a corrective recommendation.'
+          : 'No automated finding requires a corrective recommendation. You may record a spot-check outcome without selecting an action.';
+  byId('audit-recommendation-guidance').textContent = guidance;
   auditQueueState.detailId = record.id;
   const detail = byId('audit-record-detail');
   detail.hidden = false;
@@ -1056,6 +1155,9 @@ async function reanalyzeSelectedCase() {
   if (!window.confirm('Reanalyze this PDF? The result and API spend may change. Earlier evidence and review events remain on record.')) return;
   try {
     byId('audit-reanalyze').disabled = true;
+    byId('reanalyze-progress').hidden = false;
+    byId('reanalyze-progress-bar').removeAttribute('value');
+    byId('reanalyze-progress-label').textContent = 'Reanalyzing the scanned PDF…';
     await window.electronAPI.auditReanalyzeDocument({
       documentId: id, hospitalApproved: hospitalApproved.checked
     });
@@ -1067,6 +1169,7 @@ async function reanalyzeSelectedCase() {
     showNotification('Could not reanalyze the record. Check local source and authorization.', 'error');
   } finally {
     byId('audit-reanalyze').disabled = false;
+    byId('reanalyze-progress').hidden = true;
   }
 }
 async function exportToExcel() {
@@ -1110,7 +1213,9 @@ async function updateStatusIndicators() {
 
 
 function showCloudControls() {
-  cloudSettings.hidden = analysisMode.value === 'local';
+  const isLocal = analysisMode.value === 'local';
+  cloudSettings.hidden = isLocal;
+  byId('cloud-spending-limit').hidden = isLocal;
   refreshCostDashboard().catch(() => {});
 }
 
@@ -1360,14 +1465,11 @@ byId('audit-identity-task').addEventListener('click', () => auditAction('investi
 byId('audit-rescan-task').addEventListener('click', () => auditAction('rescan'));
 byId('audit-paper-task').addEventListener('click', () => auditAction('paper-comparison'));
 byId('audit-reanalyze').addEventListener('click', reanalyzeSelectedCase);
-byId('bulk-review-queue').addEventListener('click', async () => {
-  try { await refreshAuditProjects(); byId('audit-workspace').scrollIntoView({ behavior: 'smooth' }); }
-  catch (_) { showNotification('Could not load the review queue.', 'error'); }
-});
 byId('bulk-folder').addEventListener('click', selectBulkFolder);
 byId('bulk-start').addEventListener('click', startBulkAudit);
 byId('bulk-stop').addEventListener('click', stopBulkAudit);
 window.electronAPI.onBulkProgress(renderBulkProgress);
+window.electronAPI.onScanProgress(renderScanProgress);
 fileUploadArea.addEventListener('dragover', event => {
   event.preventDefault();
   fileUploadArea.classList.add('dragover');

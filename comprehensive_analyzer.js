@@ -101,8 +101,25 @@ class ComprehensiveAnalyzer {
 
       let stdout = '';
       let stderr = '';
+      let progressBuffer = '';
       child.stdout.on('data', chunk => { stdout += chunk.toString(); });
-      child.stderr.on('data', chunk => { stderr += chunk.toString(); });
+      child.stderr.on('data', chunk => {
+        const data = chunk.toString();
+        stderr += data;
+        progressBuffer += data;
+        let newline;
+        while ((newline = progressBuffer.indexOf('\n')) >= 0) {
+          const line = progressBuffer.slice(0, newline).trim();
+          progressBuffer = progressBuffer.slice(newline + 1);
+          const found = /^SCAN_PROGRESS:(\d+)$/.exec(line);
+          if (found && typeof this.reportProgress === 'function') {
+            const finishedPage = Number(found[1]);
+            if (Number.isSafeInteger(finishedPage) && finishedPage >= 1 && finishedPage <= totalPages) {
+              this.reportProgress('converting-pages', totalPages, finishedPage);
+            }
+          }
+        }
+      });
       child.on('error', reject);
       child.on('close', code => {
         if (code !== 0) {

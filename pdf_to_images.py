@@ -62,6 +62,10 @@ def convert_pdf_to_images(pdf_path, output_dir, num_pages, dpi=300):
             images[0].save(image_path, "PNG", optimize=True)
             image_paths.append(str(image_path))
             images[0].close()
+            # Machine-readable, PHI-free progress. The final result still goes
+            # to stdout as one JSON document. Flush for long-running PDF jobs.
+            sys.stderr.write(f"SCAN_PROGRESS:{page_number}\n")
+            sys.stderr.flush()
 
         return {
             "success": True,

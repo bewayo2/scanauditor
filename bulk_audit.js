@@ -201,7 +201,17 @@ async function runBulkAudit({
   const analyzer = analyzerFactory ? analyzerFactory({ mode, onUsage }) :
     mode === 'local' ? new ConfiguredAnalyzer() :
       new CloudScanAnalyzer({ mode, apiKey, onUsage });
+  // The analyzer may be supplied by a test factory. Never depend on the
+  // progress callback being available or on it successfully notifying the UI.
+  analyzer.onProgress = progress => {
+    if (!progress || typeof progress !== 'object') return;
+    counters.currentStage = progress.stage;
+    counters.currentPdfPages = progress.totalPages;
+    counters.currentPage = progress.completedPages;
+    onProgress({ ...counters, phase: 'processing' });
+  };
   const counters = {
+    currentPage: 0, currentPdfPages: null, currentStage: null,
     filesSeen: 0, processed: 0, skippedFromCheckpoint: 0, passed: 0,
     reviewRequired: 0, associationReviewRequired: 0, analysisFailed: 0, pagesProcessed: 0,
     checkpointHashMismatches: 0, legacyCheckpointSkips: 0,
@@ -239,6 +249,9 @@ async function runBulkAudit({
         counters.checkpointHashMismatches += 1;
       }
       counters.phase = 'processing';
+      counters.currentPage = 0;
+      counters.currentPdfPages = null;
+      counters.currentStage = 'opening-file';
       onProgress({ ...counters });
       let result;
       try {
@@ -278,11 +291,17 @@ async function runBulkAudit({
       }) + '\n');
       completed.set(key, { status: safeStatus, fileSha256 });
       counters.currentFileNumber = null;
+      counters.currentPage = 0;
+      counters.currentPdfPages = null;
+      counters.currentStage = null;
       counters.phase = 'running';
       onProgress({ ...counters });
     }
   } finally {
     counters.currentFileNumber = null;
+    counters.currentPage = 0;
+    counters.currentPdfPages = null;
+    counters.currentStage = null;
     counters.finished = true;
     counters.phase = counters.stopped ? 'stopped' : 'completed';
     await recordRun(userData, {

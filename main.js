@@ -36,6 +36,20 @@ async function getWorkspace() {
 }
 
 
+function emitScanProgress(context, progress) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  // Numeric progress and bounded phase only. Never send source paths or OCR.
+  if (!progress || typeof progress !== 'object') return;
+  mainWindow.webContents.send('scan-progress', {
+    context,
+    fileIndex: Number.isSafeInteger(progress.fileIndex) ? progress.fileIndex : null,
+    fileCount: Number.isSafeInteger(progress.fileCount) ? progress.fileCount : null,
+    stage: progress.stage,
+    totalPages: progress.totalPages,
+    completedPages: progress.completedPages
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -303,6 +317,7 @@ ipcMain.handle('audit-reanalyze-document', async (_event, request) => {
         mode, apiKey: sessionOpenAIKey,
         onUsage: entry => costTracker.recordUsage(app.getPath('userData'), { ...entry, runId })
       });
+    analyzer.onProgress = progress => emitScanProgress('reanalysis', progress);
     let result;
     try {
       result = await analyzer.analyzeFile({ path: source, originalname: path.basename(source) });
@@ -478,7 +493,11 @@ ipcMain.handle('analyze-files', async (_event, request) => {
     });
   const results = [];
 
-  for (const requestedPath of filePaths) {
+  for (const [fileIndex, requestedPath] of filePaths.entries()) {
+    analyzer.onProgress = progress => emitScanProgress('individual', {
+      ...progress, fileIndex, fileCount: filePaths.length
+    });
+    emitScanProgress('individual', { stage: 'opening-file', totalPages: null, completedPages: 0, fileIndex, fileCount: filePaths.length });
     let result;
     try {
       if (typeof requestedPath !== 'string' || path.extname(requestedPath).toLowerCase() !== '.pdf') {
@@ -499,6 +518,8 @@ ipcMain.handle('analyze-files', async (_event, request) => {
       if (result?.analysis) result.analysis.workspaceDocumentId = saved.id;
     }
     results.push(result);
+    emitScanProgress('individual', { stage: 'file-completed', totalPages: result?.analysis?.fileInformation?.totalPages || null,
+      completedPages: result?.analysis?.fileInformation?.totalPages || 0, fileIndex, fileCount: filePaths.length });
     await writeAuditRecord(result);
   }
 
@@ -512,7 +533,7 @@ ipcMain.handle('analyze-files', async (_event, request) => {
   } catch (_) {
     console.error('[ScanAuditor] cost_run_record_failed');
   }
-  return { results, runId };
+  return { results, runId, projectId: individualProject.id };
   } finally {
     activeAnalysis = false;
   }

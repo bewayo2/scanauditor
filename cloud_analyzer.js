@@ -123,6 +123,7 @@ class CloudScanAnalyzer extends ConfiguredAnalyzer {
       incomplete: 'incompletePages', upsideDown: 'upsideDownPages',
       sideways: 'sidewaysPages', misaligned: 'misalignedPages'
     };
+    this.reportProgress('checking-quality', imagePaths.length, 0);
     for (let i = 0; i < imagePaths.length; i += 1) {
       const page = i + 1;
       const result = this.pageCache.get(page);
@@ -159,6 +160,7 @@ class CloudScanAnalyzer extends ConfiguredAnalyzer {
         });
       }
     }
+    this.reportProgress('checking-quality', imagePaths.length, imagePaths.length);
     combined.exactDuplicateGroups = await this.findExactDuplicateImages(imagePaths);
     return combined;
   }
