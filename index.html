@@ -159,17 +159,17 @@
             <button id="audit-close-detail" type="button" class="btn btn-secondary">Back to Review Queue</button>
           </div>
           <div id="audit-record-priority" aria-live="polite"></div>
-          <div id="audit-record-content"></div>
           <div class="reviewer-identity">
             <label for="audit-action-reviewer">Reviewer name or staff ID (not authenticated)</label>
             <input id="audit-action-reviewer" type="text" maxlength="120" placeholder="Optional reviewer / staff ID" autocomplete="off" />
           </div>
+          <div id="audit-record-content"></div>
           <div class="audit-detail-actions">
             <button id="audit-open-pdf" class="btn btn-primary" type="button">Open Scanned PDF</button>
           </div>
           <details class="review-recommendations" id="audit-recommendations">
             <summary>Recommendations (optional)</summary>
-            <p class="small-note">You may record a review decision without recommending any corrective action. Choose an action only when you have enough evidence.</p>
+            <p class="small-note">You may record a review decision without recommending any corrective action. Choosing a recommendation creates an open follow-up action. Leave these options unused if you cannot yet recommend one.</p>
             <p id="audit-recommendation-guidance" class="small-note">Consider the findings above before selecting a follow-up.</p>
             <div class="audit-detail-actions">
               <button id="audit-paper-task" class="btn btn-secondary" type="button">Recommend Paper Comparison</button>
