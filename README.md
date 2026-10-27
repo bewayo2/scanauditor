@@ -162,3 +162,11 @@ node learn.js
 OCR and analysis requests are sent only to the local Ollama service at `127.0.0.1:11434`. The Electron renderer does not run a local Express upload server. The renderer communicates with the Electron main process through a narrow preload API with context isolation and sandboxing enabled.
 
 Temporary converted page images are removed after analysis. The application does not automatically delete the source PDF because it analyzes the original file selected by the user rather than creating its own copy.
+
+## Focused reviewer workflow and live page status
+
+The primary workflow is **Select PDF Folder → Start/Resume Folder Audit → Audit Projects & Review Queue → Inspect → Record human review**. Individual-PDF audits also appear in the same indexed Review Queue; the separate immediate results area contains only a recent-run summary. Processing provider, cloud benchmarking, cost planning, project exports, backups, technical reports and reanalysis remain accessible through collapsed settings/advanced sections.
+
+In a record review, **Recommendations (optional)** groups paper comparison, rescanning and identity/filing investigation. No recommendation is required to save a review outcome. These options are human-selected follow-up actions, not automatic directives. An identity concern alone does not establish a rescan requirement.
+
+Folder, individual-PDF and record-reanalysis screens now receive **per-page progress**. File conversion and preliminary image checks may take time before the first page counter advances; later structure/quality checks may also continue after OCR has read the final page. During these phases the UI displays an honest processing stage rather than an invented percentage or estimated finish time. Progress messages contain counts and controlled stage identifiers only, not filenames, folder paths, patient IDs or extracted text. The overall folder bar still counts completed PDFs separately from the current PDF's page progress.
