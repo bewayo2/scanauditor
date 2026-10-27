@@ -479,6 +479,7 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
     };
 
     const batchSize = this.auditConfig.imageBatchSize;
+    this.reportProgress('checking-quality', imagePaths.length, 0);
     for (let offset = 0; offset < imagePaths.length; offset += batchSize) {
       const batch = imagePaths.slice(offset, offset + batchSize);
       const images = [];
@@ -499,6 +500,7 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
         combined.failedBatches.push(pageNumbers);
         this.log('image_analysis_batch_failed', { pages: pageNumbers, message: error.message });
       }
+      this.reportProgress('checking-quality', imagePaths.length, offset + batch.length);
     }
 
     combined.exactDuplicateGroups = await this.findExactDuplicateImages(imagePaths);
@@ -738,6 +740,7 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
         const pageNumber = index + 1;
         let text = '';
         let analysis;
+        this.reportProgress('reading-page', totalPages, index);
         try {
           text = await this.extractTextWithOCR(imagePaths[index], pageNumber);
           analysis = text ? await this.analyzeTextPage(text, fileName, pageNumber) : this.failedPage(pageNumber, 'ocr-empty');
@@ -755,6 +758,7 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
       textAnalysis.pageLinkage = await this.classifyContinuationPages(pageContexts, fileName);
       const imageAnalysis = await this.analyzeImagesWithVision(imagePaths, fileName);
       imageAnalysis.possibleDuplicateGroups = this.findPossibleDuplicateGroups(metrics, pageContexts, imageAnalysis.exactDuplicateGroups);
+      this.reportProgress('finalizing', totalPages, totalPages);
       const internalCompleteness = analyzeInternalCompleteness(pageContexts, totalPages);
       const contentPreservation = inspectContentPreservation(pageContexts, imageAnalysis, metrics);
       const qaAssessment = this.evaluateQa(textAnalysis, imageAnalysis, metrics, internalCompleteness, contentPreservation);
