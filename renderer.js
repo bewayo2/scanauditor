@@ -653,6 +653,53 @@ let bulkPreviewing = false;
 let bulkRunning = false;
 let bulkInventory = null;
 
+// Page-level progress is independent of the folder's completed-file bar.
+// Preparing page images and final record checks are indeterminate; never
+// imply that a large PDF is fully analyzed simply because OCR reached 100%.
+function renderPageStage(labelId, barId, progress, prefix = '') {
+  const label = byId(labelId);
+  const bar = byId(barId);
+  const total = Number.isSafeInteger(progress?.totalPages) && progress.totalPages > 0
+    ? progress.totalPages : null;
+  const done = Number.isSafeInteger(progress?.completedPages)
+    ? Math.max(0, Math.min(progress.completedPages, total || 0)) : 0;
+  const stage = progress?.stage;
+  let message;
+  switch (stage) {
+    case 'opening-file': message = 'Opening scanned PDF…'; break;
+    case 'preparing-pages': message = 'Preparing ' + total + ' page images…'; break;
+    case 'checking-images': message = 'Measuring image quality…'; break;
+    case 'reading-page': message = 'Reading page ' + (done + 1) + ' of ' + total + '…'; break;
+    case 'reading-pages': message = 'Read ' + done + ' of ' + total + ' pages'; break;
+    case 'checking-record': message = 'Checking page sequence and record structure…'; break;
+    case 'checking-quality': message = 'Checking image quality: ' + done + ' of ' + total + ' pages'; break;
+    case 'finalizing': message = 'Finalizing scan QA findings…'; break;
+    case 'file-completed':
+    case 'completed': message = 'PDF analysis completed'; break;
+    default: message = 'Processing scanned PDF…';
+  }
+  label.textContent = prefix + message;
+  if (total && ['reading-page', 'reading-pages', 'checking-quality', 'file-completed', 'completed'].includes(stage)) {
+    bar.value = Math.round(100 * done / total);
+  } else {
+    bar.removeAttribute('value');
+  }
+}
+
+function renderScanProgress(progress) {
+  if (!progress || typeof progress !== 'object') return;
+  if (progress.context === 'individual') {
+    const prefix = Number.isSafeInteger(progress.fileIndex) && progress.fileCount
+      ? 'PDF ' + (progress.fileIndex + 1) + ' of ' + progress.fileCount + ' · ' : '';
+    byId('individual-progress').hidden = false;
+    renderPageStage('individual-progress-label', 'individual-progress-bar', progress, prefix);
+    renderPageStage('loading-progress-label', 'loading-progress-bar', progress, prefix);
+  } else if (progress.context === 'reanalysis') {
+    byId('reanalyze-progress').hidden = false;
+    renderPageStage('reanalyze-progress-label', 'reanalyze-progress-bar', progress);
+  }
+}
+
 function showBulkEstimate(info) {
   const files = Number(info.filesTotal);
   if (Number.isSafeInteger(files) && files >= 0) {
@@ -687,6 +734,20 @@ function renderBulkProgress(progress) {
   const current = byId('bulk-current');
   const note = byId('bulk-progress-note');
   showBulkEstimate(progress);
+  const pageProgress = byId('bulk-page-progress');
+  if (phase === 'processing') {
+    pageProgress.hidden = false;
+    const filePrefix = 'PDF ' + Number(progress.currentFileNumber || 0).toLocaleString('en-US') +
+      ' of ' + Number(progress.filesTotal || 0).toLocaleString('en-US') + ' · ';
+    renderPageStage('bulk-page-label', 'bulk-page-progress-bar', {
+      stage: progress.currentStage || 'opening-file',
+      totalPages: progress.currentPdfPages,
+      completedPages: progress.currentPage
+    }, filePrefix);
+    byId('bulk-page-detail').textContent = 'Progress updates as each page is read. Final QA checks may continue after page reading.';
+  } else if (phase === 'completed' || phase === 'stopped' || phase === 'canceled' || phase === 'ready') {
+    pageProgress.hidden = true;
+  }
   const fmt = value => Number(value || 0).toLocaleString('en-US');
 
   if (phase === 'inventory') {
@@ -743,7 +804,7 @@ function renderBulkProgress(progress) {
   byId('bulk-phase').textContent = descriptions[phase] || 'Scanning PDFs';
   current.textContent = phase === 'processing'
     ? 'Processing PDF ' + fmt(progress.currentFileNumber) + ' of ' +
-      fmt(progress.filesTotal) + ' in this folder; page count updates when this PDF finishes.'
+      fmt(progress.filesTotal) + ' in this folder. See the live page status above.'
     : phase === 'stopped'
       ? 'Stopped after the current PDF or session limit. Re-select Start / Resume to continue.'
       : phase === 'completed'
@@ -1398,6 +1459,7 @@ byId('bulk-folder').addEventListener('click', selectBulkFolder);
 byId('bulk-start').addEventListener('click', startBulkAudit);
 byId('bulk-stop').addEventListener('click', stopBulkAudit);
 window.electronAPI.onBulkProgress(renderBulkProgress);
+window.electronAPI.onScanProgress(renderScanProgress);
 fileUploadArea.addEventListener('dragover', event => {
   event.preventDefault();
   fileUploadArea.classList.add('dragover');
