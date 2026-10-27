@@ -1131,3 +1131,76 @@ body {
     background: white;
     font: inherit;
 }
+
+
+/* Keep administrative options available without crowding the audit workflow. */
+[hidden] { display: none !important; }
+.workflow-settings, .admin-tools, .audit-extra-counts, .review-recommendations {
+  margin: 14px 0;
+  padding: 13px 16px;
+  background: #f7f9fc;
+  color: #26384e;
+  border: 1px solid #cdd8e6;
+  border-radius: 10px;
+}
+.workflow-settings > summary, .admin-tools > summary,
+.audit-extra-counts > summary, .review-recommendations > summary {
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 700;
+  color: #263e60;
+  line-height: 1.55;
+}
+.workflow-settings > summary:focus-visible, .admin-tools > summary:focus-visible,
+.audit-extra-counts > summary:focus-visible, .review-recommendations > summary:focus-visible {
+  outline: 3px solid #425ba3;
+  outline-offset: 4px;
+}
+.workflow-settings .provider-section, .cost-tools .cost-section {
+  margin-top: 16px;
+}
+.workflow-settings > summary .small-note { margin-left: 8px; font-weight: 400; }
+.audit-extra-counts .cost-cards { margin-top: 14px; }
+.admin-tools .file-actions, .admin-tools .audit-detail-actions { margin-top: 12px; }
+.audit-workspace .admin-tools { margin: 12px 0; }
+.review-recommendations {
+  margin-top: 18px;
+  background: #f5f8fc;
+  border-color: #b7c9df;
+}
+.review-recommendations .small-note { color: #40546e; margin: 12px 0; }
+.review-recommendations .audit-detail-actions .btn {
+  white-space: normal;
+  min-height: 42px;
+}
+.reviewer-identity {
+  max-width: 500px; display: grid; gap: 7px; margin: 16px 0;
+}
+.reviewer-identity label { font-weight: 700; font-size: 14px; color: #33465d; }
+.reviewer-identity input {
+  font: inherit; border: 1px solid #bdc9d9; background: #fff; color: #22354d;
+  padding: 10px 12px; min-height: 42px; border-radius: 8px;
+}
+.page-progress {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 10px;
+  padding: 13px;
+  border: 1px solid #c8d5e8;
+  border-radius: 9px;
+  background: #eef4fb;
+  color: #233d62;
+}
+.page-progress strong { font-size: 14px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.page-progress progress, #loading-progress-bar {
+  display: block; width: 100%; height: 14px; border-radius: 7px;
+  accent-color: #425ba3;
+}
+.page-progress .small-note { color: #40546e; font-size: 13px; }
+.loading-content #loading-progress-bar { margin-top: 12px; width: 100%; }
+.loading-content #loading-progress-label { line-height: 1.5; }
+.results-section .results-details[hidden] { display: none; }
+@media (max-width: 650px) {
+  .workflow-settings, .admin-tools, .review-recommendations { padding: 11px; }
+  .review-recommendations .audit-detail-actions { display: grid; }
+}
