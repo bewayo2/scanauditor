@@ -703,7 +703,7 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
 
     const sessionId = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
     const outputDir = path.join(__dirname, 'temp_images', sessionId);
-    this.log('analysis_started', { fileName: path.basename(fileName) });
+    this.log('analysis_started');
 
     try {
       const pdfBuffer = await fs.readFile(file.path);
