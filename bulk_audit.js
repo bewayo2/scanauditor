@@ -26,6 +26,13 @@ function makeFileKey(secret, rel, stat) {
     .update(rel + '\0' + stat.size + '\0' + stat.mtimeMs + '\0' + stat.ctimeMs)
     .digest('hex');
 }
+// Verify a resumed checkpoint against actual PDF bytes without buffering the file.
+async function sha256File(filePath) {
+  const hash = crypto.createHash('sha256');
+  for await (const chunk of fs.createReadStream(filePath)) hash.update(chunk);
+  return hash.digest('hex');
+}
+
 async function* walkPdfs(folder, depth = 0) {
   if (depth > MODIFIERS.maxDepth) return;
   const items = await fs.readdir(folder, { withFileTypes: true });
@@ -133,7 +140,11 @@ async function readJournal(file) {
       const row = JSON.parse(line);
       if (typeof row.key === 'string' && /^[0-9a-f]{64}$/.test(row.key) &&
           ['passed', 'review-required', 'analysis-failed'].includes(row.status)) {
-        states.set(row.key, row.status);
+        states.set(row.key, {
+          status: row.status,
+          fileSha256: typeof row.fileSha256 === 'string' && /^[a-f0-9]{64}$/i.test(row.fileSha256)
+            ? row.fileSha256.toLowerCase() : null
+        });
       }
     } catch (_) { /* Ignore partial final append. */ }
   }
@@ -192,7 +203,8 @@ async function runBulkAudit({
       new CloudScanAnalyzer({ mode, apiKey, onUsage });
   const counters = {
     filesSeen: 0, processed: 0, skippedFromCheckpoint: 0, passed: 0,
-    reviewRequired: 0, analysisFailed: 0, pagesProcessed: 0,
+    reviewRequired: 0, associationReviewRequired: 0, analysisFailed: 0, pagesProcessed: 0,
+    checkpointHashMismatches: 0, legacyCheckpointSkips: 0,
     stopped: false, runId, mode, meteredSpendUSD: 0, spendingLimitUSD: mode === 'local' ? null : maxUsd,
     phase: 'running', filesTotal: inventory.filesTotal, estimatedPages: inventory.estimatedPages,
     estimateKind: inventory.estimateKind, sampledFiles: inventory.sampledFiles,
@@ -212,13 +224,19 @@ async function runBulkAudit({
       const fileStat = await fs.stat(pdfPath);
       const key = makeFileKey(state.secret, path.relative(normalizedRoot, pdfPath), fileStat);
       const prior = completed.get(key);
-      if (prior && (prior !== 'analysis-failed' || !retryFailed)) {
-        counters.skippedFromCheckpoint += 1;
-        // Progress reporting is PHI-free: only counters, never file names.
-        if (counters.filesSeen === 1 || counters.filesSeen % 25 === 0) {
-          onProgress({ ...counters, phase: 'running' });
+      if (prior && (prior.status !== 'analysis-failed' || !retryFailed)) {
+        // Metadata can remain unchanged even if the actual PDF changed.
+        const unchanged = !prior.fileSha256 || await sha256File(pdfPath) === prior.fileSha256;
+        if (unchanged) {
+          counters.skippedFromCheckpoint += 1;
+          if (!prior.fileSha256) counters.legacyCheckpointSkips += 1;
+          // Progress reporting is PHI-free: only counters, never file names.
+          if (counters.filesSeen === 1 || counters.filesSeen % 25 === 0) {
+            onProgress({ ...counters, phase: 'running' });
+          }
+          continue;
         }
-        continue;
+        counters.checkpointHashMismatches += 1;
       }
       counters.phase = 'processing';
       onProgress({ ...counters });
@@ -242,20 +260,23 @@ async function runBulkAudit({
       counters.pagesProcessed += Number(result?.analysis?.fileInformation?.totalPages) || 0;
       counters.meteredSpendUSD = meteredSpendUSD;
 
-      // Evidence is deliberately limited to version/config/hash/status; no OCR,
-      // filename, original directory, patient identifier, or free-text excerpts.
-      if (result?.analysis) {
-        await fs.appendFile(evidence, JSON.stringify({
-          jobFileKey: key, runId, ...evidenceReport(result)
-        }) + '\n');
-      }
-      // The indexed workspace must be written before the checkpoint.
-      // Source path and detailed analysis stay in the local SQLite file.
+      // Commit the indexed result before any checkpoint marker. A power loss
+      // before journal append may cause safe reanalysis, never a false skip.
+      const analyzedHash = result?.analysis?.analysisMetadata?.fileSha256;
+      const fileSha256 = typeof analyzedHash === 'string' && /^[a-f0-9]{64}$/i.test(analyzedHash)
+        ? analyzedHash.toLowerCase() : await sha256File(pdfPath);
+      if (!result.analysis) result.analysis = {};
+      if (!result.analysis.analysisMetadata) result.analysis.analysisMetadata = {};
+      result.analysis.analysisMetadata.fileSha256 = fileSha256;
       await auditStore.saveDocument(auditProject.id, pdfPath, result, runId, key);
-      await fs.appendFile(journal, JSON.stringify({
-        key, status: safeStatus, timestamp: new Date().toISOString()
+      // Evidence contains only controlled fields, codes, counts, and hashes.
+      await fs.appendFile(evidence, JSON.stringify({
+        jobFileKey: key, runId, ...evidenceReport(result)
       }) + '\n');
-      completed.set(key, safeStatus);
+      await fs.appendFile(journal, JSON.stringify({
+        key, status: safeStatus, fileSha256, timestamp: new Date().toISOString()
+      }) + '\n');
+      completed.set(key, { status: safeStatus, fileSha256 });
       counters.currentFileNumber = null;
       counters.phase = 'running';
       onProgress({ ...counters });
@@ -274,4 +295,4 @@ async function runBulkAudit({
   return { ...counters, projectId: auditProject.id, jobId: path.basename(output),
     disclaimer: 'Batch checkpoint and evidence contain no patient text. Paper completeness still requires independent source comparison.' };
 }
-module.exports = { runBulkAudit, inspectBulkFolder, walkPdfs, readJournal, makeFileKey, jobDirectory };
+module.exports = { runBulkAudit, inspectBulkFolder, walkPdfs, readJournal, makeFileKey, jobDirectory, sha256File };
