@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs-extra');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { runBulkAudit, inspectBulkFolder, walkPdfs, jobDirectory } = require('../bulk_audit');
 
 const fakeAnalyzer = () => ({
@@ -11,7 +12,10 @@ const fakeAnalyzer = () => ({
     analysis: {
       fileInformation: { totalPages: filename.includes('two') ? 2 : 4 },
       analysisMetadata: {
-        fileSha256: 'a'.repeat(64), analysisDate: '2026-10-22T10:00:00Z',
+        fileSha256: (await fs.pathExists(filename))
+          ? crypto.createHash('sha256').update(await fs.readFile(filename)).digest('hex')
+          : 'a'.repeat(64),
+        analysisDate: '2026-10-22T10:00:00Z',
         appVersion: 'test', models: { ocr: 'test' }, dpi: 300
       },
       qaAssessment: { status: 'passed', findings: [], informationalFindings: [] }
@@ -83,10 +87,10 @@ test('changed file is reprocessed as a new checkpoint version', async t => {
 test('analysis failures are skipped until explicit retry is selected', async t => {
   const { root, userData } = await tempJob(t);
   let calls = 0;
-  const factory = () => ({ analyzeFile: async () => {
+  const factory = () => ({ analyzeFile: async file => {
     calls += 1;
     if (calls === 1) throw new Error('synthetic test failure');
-    return fakeAnalyzer().analyzeFile({ path: 'two' });
+    return fakeAnalyzer().analyzeFile(file);
   } });
   const first = await runBulkAudit({ root, userData, analyzerFactory: factory });
   assert.equal(first.analysisFailed, 1);
@@ -239,4 +243,57 @@ test('an empty selected folder shows exactly zero PDFs and zero anticipated page
   assert.equal(result.filesTotal, 0);
   assert.equal(result.estimatedPages, 0);
   assert.equal(result.estimateKind, 'exact-metadata');
+});
+
+test('resuming detects a corrupted checkpoint digest even when PDF metadata is unchanged', async t => {
+  const { root, userData } = await tempJob(t);
+  await runBulkAudit({ root, userData, analyzerFactory: fakeAnalyzer });
+  const journalPath = path.join(jobDirectory(userData, root, 'local'), 'checkpoint.jsonl');
+  const rows = (await fs.readFile(journalPath, 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(rows.length, 2);
+  rows[0].fileSha256 = '0'.repeat(64);
+  await fs.writeFile(journalPath, rows.map(row => JSON.stringify(row)).join('\n') + '\n');
+  const result = await runBulkAudit({ root, userData, analyzerFactory: fakeAnalyzer });
+  assert.equal(result.processed, 1);
+  assert.equal(result.skippedFromCheckpoint, 1);
+  assert.equal(result.checkpointHashMismatches, 1);
+  const final = await runBulkAudit({ root, userData, analyzerFactory: fakeAnalyzer });
+  assert.equal(final.processed, 0);
+  assert.equal(final.skippedFromCheckpoint, 2);
+});
+
+test('old checkpoints remain skippable and are counted as legacy unverified', async t => {
+  const { root, userData } = await tempJob(t);
+  await runBulkAudit({ root, userData, analyzerFactory: fakeAnalyzer });
+  const journalPath = path.join(jobDirectory(userData, root, 'local'), 'checkpoint.jsonl');
+  const rows = (await fs.readFile(journalPath, 'utf8')).trim().split('\n').map(JSON.parse);
+  delete rows[0].fileSha256;
+  await fs.writeFile(journalPath, rows.map(row => JSON.stringify(row)).join('\n') + '\n');
+  const result = await runBulkAudit({ root, userData, analyzerFactory: fakeAnalyzer });
+  assert.equal(result.processed, 0);
+  assert.equal(result.skippedFromCheckpoint, 2);
+  assert.equal(result.legacyCheckpointSkips, 1);
+});
+
+test('patient folder identity alerts increment a finite bulk progress counter', async t => {
+  const { root, userData } = await tempJob(t);
+  const patientFolder = path.join(root, 'REG 654321 - Alex Example');
+  await fs.ensureDir(patientFolder);
+  await fs.writeFile(path.join(patientFolder, 'identity.pdf'), 'synthetic-not-medical');
+  const analyzerFactory = () => ({
+    analyzeFile: async file => {
+      const value = await fakeAnalyzer().analyzeFile(file);
+      if (file.path.includes('identity.pdf')) {
+        value.analysis.fileInformation.totalPages = 2;
+        value.analysis.identifierMentions = [1, 2].map(pageNumber => ({
+          pageNumber, kind: 'registration', value: '345678',
+          confidence: 'high', evidence: 'Hospital Number label'
+        }));
+      }
+      return value;
+    }
+  });
+  const result = await runBulkAudit({ root, userData, analyzerFactory });
+  assert.equal(result.associationReviewRequired, 1);
+  assert.equal(Number.isFinite(result.associationReviewRequired), true);
 });

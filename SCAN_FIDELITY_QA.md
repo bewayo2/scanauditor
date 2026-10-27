@@ -1,6 +1,6 @@
 # ScanAuditor Scan-Fidelity QA
 
-ScanAuditor performs automated quality assurance on PDF copies of paper medical records, using local Ollama by default or hospital-authorized cloud inference. Its purpose is to identify conditions that may indicate the digital copy does not faithfully reproduce the paper source.
+ScanAuditor performs automated quality assurance on PDF copies of paper medical records, using local Ollama by default or hospital-authorized cloud inference. Its purpose is to identify conditions that may indicate the digital copy does not faithfully reproduce the paper source. [PRESERVATION_QA.md](PRESERVATION_QA.md) is the authoritative detailed QA decision policy.
 
 ## What the automated QA checks
 
@@ -20,7 +20,9 @@ ScanAuditor performs automated quality assurance on PDF copies of paper medical 
 ScanAuditor checks the **fidelity of digitization**, not the legibility, completeness, or clinical correctness of the paper original. The model cannot prove from a PDF alone whether the paper was faded, blurred, or poorly handwritten.
 
 - **Informational:** Uncertain handwritten patient names or hospital numbers, uncertain dates, and low-confidence or unsupported model observations of blur, lightness, darkness, or tilt. These do not alone force `Review Required`.
-- **Review Required:** Strong, localized model evidence of material loss of printed content (such as visibly clipped content or materially illegible printed text), unresolved page linkage, confirmed competing patient identifiers, or detected duplicates. **Possible defects always require comparison with the paper before recommending rescanning.**
+- **Review Required (scan quality):** Strong evidence of possible material digital content loss, credible printed-page gaps, unexpected blank pages, or incomplete technical processing. Compare suspected scan defects against the source paper before recommending rescanning.
+- **Informational only:** Unresolved unnumbered continuations, OCR-derived multiple patient candidates, or duplicate-looking pages alone do not establish a scanning defect.
+- **Separate patient-folder / identity review:** Corroborated folder-versus-PDF identity discrepancies enter the overall review queue without being mislabeled as scan-quality defects. Minor one-digit variations are evaluated against evidence from the whole PDF.
 - **Technical processing issues:** failed OCR, image metrics or other analysis stages remain review/analysis failures.
 - **Legacy local image assessments:** because older/local quality results may lack granular evidence, severe unreadable/cutoff/incomplete flags still go to review. Subjective blur/lighting/tilt without corroboration remains informational.
 
@@ -28,7 +30,7 @@ The cloud model returns bounded non-PHI quality categories (type, confidence, re
 
 ## Human review outcomes
 
-The results UI saves a reviewer-selected outcome to a local append-only file indexed by document SHA-256. Choices distinguish a **digital-only visual inspection** (no digitization defect seen or suspected model false positive) from **confirmed paper comparisons** (source issue or scanning defect). Do not select a paper-confirmed outcome unless the paper was actually reviewed. Outcomes are saved separately from the automated status; they never silently replace it. No extracted medical text, patient names or numbers are stored in the review-outcome log.
+Indexed cases store human review decisions and append-only events in the local SQLite workspace; the legacy individual-file review path uses a SHA-256-keyed JSONL file. Digital-only inspection and paper-source comparisons are recorded separately. Reanalysis retains an earlier review only when the PDF hash and material automated findings remain unchanged. Previous events remain in history. Reviewer labels are not authenticated. Human outcomes do not overwrite automated QA findings.
 
 ## Technical processing diagnostics
 

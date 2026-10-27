@@ -179,3 +179,39 @@ test('whole-page extraction retains labeled mentions through the shared local/cl
   assert.equal(result.analysis.recordAssociation.status, 'needs-review');
   assert.deepEqual(result.analysis.recordAssociation.flags[0].pages, [2, 3]);
 });
+
+test('whole-record majority suppresses two isolated one-digit OCR variations', () => {
+  const evidence = [
+    ...Array.from({ length: 18 }, (_, index) => reg(index + 1, '654321')),
+    reg(19, '654322'), reg(20, '654322'),
+    name(1, 'Alex Example'), name(20, 'Alex Example')
+  ];
+  const result = evaluateRecordAssociation(PDF, root, evidence, { totalPages: 20 });
+  assert.equal(result.status, 'matched');
+  assert.equal(result.flags.length, 0);
+  assert.ok(result.observations.some(item => item.observedRegistration === '654322'));
+});
+
+test('repeated different one-digit registration without a correct match requires review', () => {
+  const evidence = Array.from({ length: 6 }, (_, i) => reg(i + 1, '654322'));
+  const result = evaluateRecordAssociation(PDF, root, evidence, { totalPages: 6 });
+  assert.equal(result.status, 'needs-review');
+  assert.deepEqual(result.flags[0].pages, [1, 2, 3, 4, 5, 6]);
+});
+
+test('a sustained alternate one-digit registration outweighing the correct ID requires review', () => {
+  const evidence = [reg(1, '654321'), ...Array.from({ length: 8 }, (_, i) => reg(i + 2, '654322'))];
+  const result = evaluateRecordAssociation(PDF, root, evidence, { totalPages: 9 });
+  assert.equal(result.status, 'needs-review');
+  assert.equal(result.flags[0].observedRegistration, '654322');
+});
+
+test('minority one-digit reading stays informational even when repeated across several pages', () => {
+  const evidence = [
+    ...Array.from({ length: 15 }, (_, i) => reg(i + 1, '654321')),
+    ...Array.from({ length: 5 }, (_, i) => reg(i + 16, '654322'))
+  ];
+  const result = evaluateRecordAssociation(PDF, root, evidence, { totalPages: 20 });
+  assert.equal(result.status, 'matched');
+  assert.equal(result.flags.length, 0);
+});

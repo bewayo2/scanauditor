@@ -104,7 +104,8 @@ test('reanalyzing a changed PDF supersedes current status but retains review eve
   await store.reviewDocument(first.id, 'no-defect-digital', 'Tester');
   const unchanged = await store.saveDocument(project.id, source, analysis('test-case.pdf', 'passed'));
   assert.equal(unchanged.id, first.id);
-  assert.equal((await store.getDocument(first.id)).review_outcome, 'no-defect-digital');
+  // The file hash is unchanged, but QA status changed; old review is stale.
+  assert.equal((await store.getDocument(first.id)).review_outcome, null);
   const changed = await store.saveDocument(project.id, source,
     analysis('test-case.pdf', 'review-required', updatedHash));
   const record = await store.getDocument(changed.id);
@@ -433,4 +434,39 @@ test('SQLite upgrades preexisting v3 identity cases into the same findings index
   t.after(async () => reopenedAgain.close());
   findings = await reopenedAgain.listFindingTypes(project.id);
   assert.deepEqual(findings, [{ code: 'REGISTRATION_DISCREPANCY', documents: 1 }]);
+});
+
+test('unchanged findings preserve review, but revised pages invalidate it without altering history', async t => {
+  const { store, project, root } = await setup(t);
+  const source = path.join(root, 'review-version.pdf');
+  const first = await store.saveDocument(project.id, source, analysis('review-version.pdf', 'review-required'));
+  await store.reviewDocument(first.id, 'model-false-positive', 'Reviewer One');
+  await store.saveDocument(project.id, source, analysis('review-version.pdf', 'review-required'));
+  assert.equal((await store.getDocument(first.id)).review_outcome, 'model-false-positive');
+
+  const changedFindings = analysis('review-version.pdf', 'review-required');
+  changedFindings.analysis.qaAssessment.findings[0].pages = [2, 4];
+  await store.saveDocument(project.id, source, changedFindings);
+  const current = await store.getDocument(first.id);
+  assert.equal(current.review_outcome, null);
+  assert.equal(current.reviews.length, 1);
+  assert.equal(current.qa_status, 'review-required');
+});
+
+test('new patient-folder identity alerts also invalidate a prior review', async t => {
+  const { store, project, root } = await setup(t);
+  const source = path.join(root, 'patient-association.pdf');
+  const initial = analysis('patient-association.pdf', 'passed');
+  initial.analysis.recordAssociation = { status: 'matched', flags: [] };
+  const first = await store.saveDocument(project.id, source, initial);
+  await store.reviewDocument(first.id, 'folder-match-verified', 'Reviewer One');
+  const reclassified = analysis('patient-association.pdf', 'passed');
+  reclassified.analysis.recordAssociation = {
+    status: 'needs-review', flags: [{ code: 'REGISTRATION_DISCREPANCY', pages: [2, 3] }]
+  };
+  await store.saveDocument(project.id, source, reclassified);
+  const latest = await store.getDocument(first.id);
+  assert.equal(latest.review_outcome, null);
+  assert.equal(latest.reviews.length, 1);
+  assert.equal(latest.association_status, 'needs-review');
 });
