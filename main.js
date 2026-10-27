@@ -200,7 +200,7 @@ async function writeAuditRecord(result) {
   try {
     await appendAuditRecord(app.getPath('userData'), result, app.getVersion());
   } catch (error) {
-    console.error('[ScanAuditor] audit_log_failed', { message: error.message });
+    console.error('[ScanAuditor] audit_log_failed');
   }
 }
 
@@ -489,7 +489,7 @@ ipcMain.handle('analyze-files', async (_event, request) => {
       if (!stat.isFile()) throw new Error('Selected path is not a file.');
       result = await analyzer.analyzeFile({ path: realPath, originalname: path.basename(realPath) });
     } catch (error) {
-      console.error('[ScanAuditor] analysis_failed', { message: error.message });
+      console.error('[ScanAuditor] analysis_failed');
       result = failureResult(requestedPath, error);
     }
     // Individual and folder results use the same indexed case record format.
@@ -622,7 +622,7 @@ ipcMain.handle('export-to-excel', async (_event, analysisResults) => {
     XLSX.writeFile(workbook, result.filePath);
     return { success: true, filePath: result.filePath };
   } catch (error) {
-    console.error('[ScanAuditor] export_failed', { message: error.message });
+    console.error('[ScanAuditor] export_failed');
     return { success: false, error: error.message };
   }
 });
