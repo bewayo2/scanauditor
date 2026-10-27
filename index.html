@@ -20,6 +20,8 @@
     </header>
 
     <main class="main-content">
+      <details class="workflow-settings">
+        <summary>Processing settings <span class="small-note">Local processing is the default</span></summary>
       <section class="provider-section" aria-labelledby="provider-heading">
         <div class="section-header">
           <h2 id="provider-heading">Analysis Provider</h2>
@@ -29,8 +31,8 @@
           <label for="analysis-mode">Mode</label>
           <select id="analysis-mode">
             <option value="local">Local only (Ollama; no API charges)</option>
-            <option value="tiered">OpenAI: GPT-6 Luna + GPT-6.1 Sol fallback</option>
-            <option value="astra">OpenAI: GPT-6 Astra benchmark</option>
+            <option value="tiered">OpenAI cloud (hospital-approved processing)</option>
+            <optgroup label="Advanced model validation"><option value="astra">Cloud benchmark mode</option></optgroup>
           </select>
           <div id="cloud-settings" hidden>
             <label for="openai-api-key">Hospital OpenAI API key (session-only)</label>
@@ -45,6 +47,7 @@
           </div>
         </div>
       </section>
+      </details>
 
       <section class="file-section" aria-labelledby="bulk-heading">
         <div class="section-header">
@@ -55,7 +58,6 @@
           <button id="bulk-folder" class="btn btn-secondary" type="button">Select PDF Folder</button>
           <button id="bulk-start" class="btn btn-success" type="button" disabled>Start / Resume Folder Audit</button>
           <button id="bulk-stop" class="btn btn-secondary" type="button" disabled>Stop After Current File</button>
-          <button id="bulk-review-queue" class="btn btn-primary" type="button">View Review Queue</button>
         </div>
         <div class="bulk-path-display">
           <strong>Selected folder</strong>
@@ -68,22 +70,33 @@
             <span id="bulk-progress-percentage">Not started</span>
           </div>
           <progress id="bulk-progress-bar" max="100" value="0" aria-label="Current batch progress"></progress>
+          <div class="page-progress" id="bulk-page-progress" role="status" aria-live="polite">
+            <strong id="bulk-page-label">No PDF being analyzed</strong>
+            <progress id="bulk-page-progress-bar" max="100" value="0" aria-label="Current PDF page progress"></progress>
+            <span id="bulk-page-detail" class="small-note">Per-page status appears when a PDF starts processing.</span>
+          </div>
           <p id="bulk-current" class="small-note">Selecting a folder starts an inventory of PDFs and a sample-based page estimate, before any record is analyzed.</p>
         </div>
         <div class="cost-planning">
           <div><label for="bulk-max-files">Maximum new files this session</label><input id="bulk-max-files" type="number" min="1" max="1000000" step="1" value="100" /></div>
-          <div><label for="bulk-max-usd">Maximum metered API spending (USD; cloud mode)</label><input id="bulk-max-usd" type="number" min="0.01" max="100000" step="0.01" value="5" /></div>
+          <div id="cloud-spending-limit" hidden><label for="bulk-max-usd">Maximum metered API spending (USD)</label><input id="bulk-max-usd" type="number" min="0.01" max="100000" step="0.01" value="5" /></div>
         </div>
         <label class="approval-line"><input id="bulk-retry-failed" type="checkbox" /> Retry analysis failures previously recorded in this job</label>
         <div class="cost-cards">
-          <div class="cost-card"><span>PDF files found</span><strong id="bulk-files-total">—</strong></div>
-          <div class="cost-card"><span>Anticipated pages in folder</span><strong id="bulk-pages-expected">—</strong></div>
-          <div class="cost-card"><span>Pages actually processed this session</span><strong id="bulk-pages-done">0</strong></div>
           <div class="cost-card"><span>PDFs checked this session</span><strong id="bulk-processed">0</strong></div>
-          <div class="cost-card"><span>Already in checkpoint</span><strong id="bulk-skipped">0</strong></div>
           <div class="cost-card"><span>Review required</span><strong id="bulk-review">0</strong></div>
-          <div class="cost-card"><span>Patient folder / identity alerts</span><strong id="bulk-identity-review">0</strong></div>
           <div class="cost-card"><span>Analysis failed</span><strong id="bulk-failed">0</strong></div>
+        </div>
+        <details class="audit-extra-counts">
+          <summary>More audit counts and page estimates</summary>
+          <div class="cost-cards">
+            <div class="cost-card"><span>PDF files found</span><strong id="bulk-files-total">—</strong></div>
+            <div class="cost-card"><span>Anticipated pages in folder</span><strong id="bulk-pages-expected">—</strong></div>
+            <div class="cost-card"><span>Pages actually processed this session</span><strong id="bulk-pages-done">0</strong></div>
+            <div class="cost-card"><span>Already in checkpoint</span><strong id="bulk-skipped">0</strong></div>
+            <div class="cost-card"><span>Patient folder / identity alerts</span><strong id="bulk-identity-review">0</strong></div>
+          </div>
+        </details>
         </div>
         <p id="bulk-estimate-note" class="small-note">Anticipated pages are estimated from PDF page metadata, not the number of PDF files. Inventory and sampling are read-only. Unreadable files or unusual sample sizes can affect the estimate.</p>
         <p id="bulk-progress-note" class="small-note">Cloud mode requires explicit hospital approval and a session API key. Progress and page totals count the current session; previous completed PDFs stay in the checkpoint.</p>
@@ -111,9 +124,16 @@
             <select id="audit-finding" aria-describedby="audit-issue-help"><option value="">All problem types</option></select></div>
           <button id="audit-search-button" class="btn btn-secondary" type="button">Filter Results</button>
           <button id="audit-refresh" class="btn btn-secondary" type="button">Refresh</button>
-          <button id="audit-export-summary" class="btn btn-secondary" type="button">Export Project Summary (CSV)</button>
-          <button id="audit-backup" class="btn btn-secondary" type="button">Back Up Audit Database</button>
+
         </div>
+        <details class="admin-tools">
+          <summary>Reports, backup and administration</summary>
+          <div class="file-actions">
+            <button id="audit-export-summary" class="btn btn-secondary" type="button">Export Project Summary (CSV)</button>
+            <button id="audit-backup" class="btn btn-secondary" type="button">Back Up Audit Database</button>
+          </div>
+          <p class="small-note">Exports and backups may contain sensitive hospital information. Use approved storage.</p>
+        </details>
         <p id="audit-issue-help" class="audit-filter-help">Filter by the type of possible scanning problem. These are automated findings that may still need human confirmation.</p>
         <div class="audit-queue-summary" role="status" aria-live="polite">
           <strong id="audit-case-total">No project selected</strong>
@@ -141,16 +161,34 @@
           </div>
           <div id="audit-record-priority" aria-live="polite"></div>
           <div id="audit-record-content"></div>
+          <div class="reviewer-identity">
+            <label for="audit-action-reviewer">Reviewer name or staff ID (not authenticated)</label>
+            <input id="audit-action-reviewer" type="text" maxlength="120" placeholder="Optional reviewer / staff ID" autocomplete="off" />
+          </div>
           <div class="audit-detail-actions">
-            <label for="audit-action-reviewer">Staff ID for corrective actions (not authenticated)</label>
-            <input id="audit-action-reviewer" type="text" maxlength="120" placeholder="Optional staff ID" autocomplete="off" />
-            <button id="audit-open-pdf" class="btn btn-secondary" type="button">Open Original PDF</button>
-            <button id="audit-export-evidence" class="btn btn-secondary" type="button">Export QA Evidence</button>
-            <button id="audit-export-record-excel" class="btn btn-secondary" type="button">Export Detailed Record (Excel)</button>
-            <button id="audit-reanalyze" class="btn btn-secondary" type="button">Reanalyze This Record</button>
-            <button id="audit-identity-task" class="btn btn-secondary" type="button">Request Identity / Filing Investigation</button>
-            <button id="audit-rescan-task" class="btn btn-secondary" type="button">Request Rescan</button>
-            <button id="audit-paper-task" class="btn btn-secondary" type="button">Request Paper Comparison</button>
+            <button id="audit-open-pdf" class="btn btn-primary" type="button">Open Scanned PDF</button>
+          </div>
+          <details class="review-recommendations" id="audit-recommendations">
+            <summary>Recommendations (optional)</summary>
+            <p class="small-note">You may record a review decision without recommending any corrective action. Choose an action only when you have enough evidence.</p>
+            <p id="audit-recommendation-guidance" class="small-note">Consider the findings above before selecting a follow-up.</p>
+            <div class="audit-detail-actions">
+              <button id="audit-paper-task" class="btn btn-secondary" type="button">Recommend Paper Comparison</button>
+              <button id="audit-rescan-task" class="btn btn-secondary" type="button">Recommend Rescan</button>
+              <button id="audit-identity-task" class="btn btn-secondary" type="button">Recommend Identity / Filing Investigation</button>
+            </div>
+          </details>
+          <details class="admin-tools">
+            <summary>Case reports and advanced actions</summary>
+            <div class="audit-detail-actions">
+              <button id="audit-export-evidence" class="btn btn-secondary" type="button">Export QA Evidence</button>
+              <button id="audit-export-record-excel" class="btn btn-secondary" type="button">Export Detailed Record (Excel)</button>
+              <button id="audit-reanalyze" class="btn btn-secondary" type="button">Reanalyze This Record</button>
+            </div>
+          </details>
+          <div id="reanalyze-progress" class="page-progress" hidden aria-live="polite">
+            <strong id="reanalyze-progress-label">Reanalyzing PDF…</strong>
+            <progress id="reanalyze-progress-bar" max="100" value="0" aria-label="Reanalysis page progress"></progress>
           </div>
           <p class="small-note">The original PDF opens in the workstation's PDF viewer. Automated QA findings remain separate from human decisions. Do not mark a paper comparison unless the original paper was actually inspected.</p>
           <div id="audit-record-actions"></div>
@@ -181,11 +219,17 @@
             <button class="btn btn-secondary" id="clear-files-btn" type="button">Clear All</button>
             <button class="btn btn-success" id="analyze-files-btn" type="button">Analyze Files</button>
           </div>
+          <div id="individual-progress" class="page-progress" hidden role="status" aria-live="polite">
+            <strong id="individual-progress-label">Preparing the selected PDF…</strong>
+            <progress id="individual-progress-bar" max="100" value="0" aria-label="Individual PDF page progress"></progress>
+            <span class="small-note">Large PDFs are processed page by page. Final quality checks follow page reading.</span>
+          </div>
         </div>
       </section>
 
       </details>
 
+      <details class="admin-tools cost-tools"><summary>Cost planning and usage history</summary>
       <section class="cost-section" aria-labelledby="cost-heading">
         <div class="section-header">
           <h2 id="cost-heading">Estimate Scanning Cost</h2>
@@ -244,27 +288,32 @@
           </div>
         </details>
       </section>
+      </details>
 
       <section class="results-section" id="results-section">
         <div class="section-header">
-          <h2>Automated QA Results</h2>
-          <p>AI extracts evidence and observations; deterministic rules assign the final automated QA status.</p>
+          <h2>Recent Audit Summary</h2>
+          <p>All reviewed records are saved in the Audit Projects &amp; Review Queue above. Open that queue to record outcomes or corrective actions.</p>
         </div>
         <div class="results-container">
           <div class="results-summary" id="results-summary"></div>
-          <div class="results-details" id="results-details"></div>
+          <div class="results-details" id="results-details" hidden></div>
         </div>
-        <div class="results-actions">
-          <button class="btn btn-primary" id="export-excel-btn" type="button">Export to Excel</button>
-          <button class="btn btn-secondary" id="export-qa-evidence" type="button">Export QA Evidence (JSON)</button>
-        </div>
+        <details class="admin-tools">
+          <summary>Export recently analyzed files (optional)</summary>
+          <div class="results-actions">
+            <button class="btn btn-secondary" id="export-excel-btn" type="button">Export to Excel</button>
+            <button class="btn btn-secondary" id="export-qa-evidence" type="button">Export QA Evidence (JSON)</button>
+          </div>
+        </details>
       </section>
 
       <div class="loading-overlay" id="loading-overlay">
         <div class="loading-content">
           <div class="spinner"></div>
           <h3>Running Automated QA...</h3>
-          <p>Every PDF page is processed. Large records can take time.</p>
+          <p id="loading-progress-label">Preparing analysis. Page-by-page progress will appear shortly.</p>
+          <progress id="loading-progress-bar" max="100" value="0" aria-label="Current PDF page progress"></progress>
         </div>
       </div>
     </main>
