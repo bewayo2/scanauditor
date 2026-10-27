@@ -116,13 +116,28 @@ function evaluateRecordAssociation(sourcePath, root, mentions = [], options = {}
     const pages = [...pagesSet].sort((a,b)=>a-b);
     const differences = number.length === ref.length
       ? [...number].filter((ch,i)=>ch!==ref[i]).length : 99;
+    // Evaluate competing numbers across the whole PDF. A few one-digit OCR
+    // variations should not outweigh the expected registration repeatedly
+    // observed elsewhere. An alternative that is the only recurring labeled
+    // registration, or strongly dominates the expected value, requires review.
+    const matchedCount = base.matchedRegistrationPages.length;
+    const oneDigitConflict = differences === 1;
+    const corroboratedOneDigitConflict = oneDigitConflict && (
+      (matchedCount === 0 && pages.length >= 2) ||
+      (matchedCount > 0 && pages.length >= 4 && pages.length >= 2 * matchedCount)
+    );
+    const seriousDifferentNumber = differences >= 2 && (pages.length >= 2 || pdfPageCount === 1);
+    const warrantsReview = seriousDifferentNumber || corroboratedOneDigitConflict;
     const detail = { code:'REGISTRATION_DISCREPANCY', pages, observedRegistration:number,
-      confidence: differences >= 2 && (pages.length >= 2 || pdfPageCount === 1) ? 'high' : 'low',
-      reason: differences <= 1 ? 'Possible single-character OCR variation in registration number.'
-        : pdfPageCount === 1
-          ? 'The single-page PDF contains a clearly labeled registration materially different from its patient folder.'
-          : pages.length < 2 ? 'Isolated different registration number; could refer to another record or OCR.'
-            : 'A different labeled patient registration appears on multiple PDF pages.' };
+      confidence: warrantsReview ? 'high' : 'low',
+      reason: corroboratedOneDigitConflict
+        ? 'A one-digit alternate registration consistently predominates across labeled pages; verify against the folder.'
+        : differences <= 1
+          ? 'Isolated or minority one-digit variation; likely OCR uncertainty unless other identity evidence disagrees.'
+          : pdfPageCount === 1
+            ? 'The single-page PDF contains a clearly labeled registration materially different from its patient folder.'
+            : pages.length < 2 ? 'Isolated different registration number; could refer to another record or OCR.'
+              : 'A different labeled patient registration appears on multiple PDF pages.' };
     (detail.confidence === 'high' ? base.flags : base.observations).push(detail);
   }
   // Evaluate patient-name evidence over the *whole PDF*, merging close OCR
