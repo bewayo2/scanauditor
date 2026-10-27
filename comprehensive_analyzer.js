@@ -61,8 +61,21 @@ class ComprehensiveAnalyzer {
   }
 
   log(event, details = {}) {
-    // Deliberately avoid logging OCR text, names, hospital numbers, dates, or model payloads.
-    console.log(`[ScanAuditor] ${event}`, details);
+    // Allowlist structured diagnostics; never print filenames, paths, exception
+    // messages, OCR text, patient identifiers, or model responses to consoles.
+    const safe = {};
+    for (const key of ['pageNumber', 'attempt', 'totalPages', 'pagesFailed', 'durationMs']) {
+      if (Number.isSafeInteger(details[key])) safe[key] = details[key];
+    }
+    if (Array.isArray(details.pages)) {
+      safe.pages = details.pages.filter(value => Number.isSafeInteger(value) && value > 0).slice(0, 20);
+    }
+    for (const key of ['qaStatus', 'failureCategory']) {
+      if (typeof details[key] === 'string' && /^[a-z0-9-]{1,48}$/.test(details[key])) {
+        safe[key] = details[key];
+      }
+    }
+    console.log(`[ScanAuditor] ${event}`, safe);
   }
 
   getPythonPath() {
@@ -789,7 +802,7 @@ class ComprehensiveAnalyzer {
 
     const sessionId = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
     const outputDir = path.join(__dirname, 'temp_images', sessionId);
-    this.log('analysis_started', { fileName: path.basename(fileName) });
+    this.log('analysis_started');
 
     try {
       const pdfBuffer = await fs.readFile(file.path);
