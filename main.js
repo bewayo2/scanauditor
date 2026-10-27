@@ -533,7 +533,7 @@ ipcMain.handle('analyze-files', async (_event, request) => {
   } catch (_) {
     console.error('[ScanAuditor] cost_run_record_failed');
   }
-  return { results, runId };
+  return { results, runId, projectId: individualProject.id };
   } finally {
     activeAnalysis = false;
   }
