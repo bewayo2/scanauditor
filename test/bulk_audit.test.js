@@ -87,10 +87,10 @@ test('changed file is reprocessed as a new checkpoint version', async t => {
 test('analysis failures are skipped until explicit retry is selected', async t => {
   const { root, userData } = await tempJob(t);
   let calls = 0;
-  const factory = () => ({ analyzeFile: async () => {
+  const factory = () => ({ analyzeFile: async file => {
     calls += 1;
     if (calls === 1) throw new Error('synthetic test failure');
-    return fakeAnalyzer().analyzeFile({ path: 'two' });
+    return fakeAnalyzer().analyzeFile(file);
   } });
   const first = await runBulkAudit({ root, userData, analyzerFactory: factory });
   assert.equal(first.analysisFailed, 1);
