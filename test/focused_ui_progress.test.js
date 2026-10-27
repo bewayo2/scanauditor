@@ -70,3 +70,24 @@ test('progress reporting cannot interrupt the analysis', () => {
   });
   assert.doesNotThrow(() => analyzer.reportProgress('reading-pages', 300, 21));
 });
+
+test('PDF page-image conversion reports completed pages before OCR begins', () => {
+  const converter = fs.readFileSync(path.join(__dirname, '..', 'pdf_to_images.py'), 'utf8');
+  const engine = fs.readFileSync(path.join(__dirname, '..', 'comprehensive_analyzer.js'), 'utf8');
+  assert.match(converter, /SCAN_PROGRESS:/);
+  assert.match(converter, /sys\.stderr\.flush\(\)/);
+  assert.match(engine, /progressBuffer\.indexOf/);
+  assert.match(engine, /this\.reportProgress\('converting-pages'/);
+  assert.match(renderer, /case 'converting-pages'/);
+});
+
+test('HTML controls have unique IDs and balanced named sections', () => {
+  const ids = [...html.matchAll(/\\bid="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(ids.length, new Set(ids).size);
+  const tags = ['section', 'details', 'div', 'main', 'header'];
+  for (const tag of tags) {
+    const opened = (html.match(new RegExp('<' + tag + '(?:\\s|>)', 'g')) || []).length;
+    const closed = (html.match(new RegExp('</' + tag + '>', 'g')) || []).length;
+    assert.equal(opened, closed, tag + ' tags must balance');
+  }
+});
