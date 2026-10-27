@@ -108,10 +108,10 @@ class ComprehensiveAnalyzer {
         stderr += data;
         progressBuffer += data;
         let newline;
-        while ((newline = progressBuffer.indexOf('\\n')) >= 0) {
+        while ((newline = progressBuffer.indexOf('\n')) >= 0) {
           const line = progressBuffer.slice(0, newline).trim();
           progressBuffer = progressBuffer.slice(newline + 1);
-          const found = /^SCAN_PROGRESS:(\\d+)$/.exec(line);
+          const found = /^SCAN_PROGRESS:(\d+)$/.exec(line);
           if (found && typeof this.reportProgress === 'function') {
             const finishedPage = Number(found[1]);
             if (Number.isSafeInteger(finishedPage) && finishedPage >= 1 && finishedPage <= totalPages) {
