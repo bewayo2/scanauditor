@@ -82,7 +82,7 @@ test('PDF page-image conversion reports completed pages before OCR begins', () =
 });
 
 test('HTML controls have unique IDs and balanced named sections', () => {
-  const ids = [...html.matchAll(/\\bid="([^"]+)"/g)].map(match => match[1]);
+  const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
   assert.equal(ids.length, new Set(ids).size);
   const tags = ['section', 'details', 'div', 'main', 'header'];
   for (const tag of tags) {
