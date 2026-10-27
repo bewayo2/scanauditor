@@ -3,7 +3,15 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   selectFiles: () => ipcRenderer.invoke('select-files'),
   getBackendStatus: () => ipcRenderer.invoke('get-backend-status'),
-  getPathForFile: file => webUtils.getPathForFile(file),
+  // Electron 28 exposes File.path; Electron 29+ exposes webUtils.
+  // Keep either version able to accept dropped PDFs without changing the UI.
+  getPathForFile: file => {
+    if (webUtils && typeof webUtils.getPathForFile === 'function') {
+      return webUtils.getPathForFile(file);
+    }
+    if (file && typeof file.path === 'string' && file.path) return file.path;
+    throw new Error('Dropped file path unavailable. Use Browse Files.');
+  },
   analyzeFiles: filePaths => ipcRenderer.invoke('analyze-files', filePaths),
   exportToExcel: analysisResults => ipcRenderer.invoke('export-to-excel', analysisResults),
   exportQaEvidence: results => ipcRenderer.invoke('export-qa-evidence', results),
