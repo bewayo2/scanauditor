@@ -668,6 +668,7 @@ function renderPageStage(labelId, barId, progress, prefix = '') {
   switch (stage) {
     case 'opening-file': message = 'Opening scanned PDF…'; break;
     case 'preparing-pages': message = 'Preparing ' + total + ' page images…'; break;
+    case 'converting-pages': message = 'Prepared ' + done + ' of ' + total + ' page images'; break;
     case 'checking-images': message = 'Measuring image quality…'; break;
     case 'reading-page': message = 'Reading page ' + (done + 1) + ' of ' + total + '…'; break;
     case 'reading-pages': message = 'Read ' + done + ' of ' + total + ' pages'; break;
@@ -679,7 +680,7 @@ function renderPageStage(labelId, barId, progress, prefix = '') {
     default: message = 'Processing scanned PDF…';
   }
   label.textContent = prefix + message;
-  if (total && ['reading-page', 'reading-pages', 'checking-quality', 'file-completed', 'completed'].includes(stage)) {
+  if (total && ['converting-pages', 'reading-page', 'reading-pages', 'checking-quality', 'file-completed', 'completed'].includes(stage)) {
     bar.value = Math.round(100 * done / total);
   } else {
     bar.removeAttribute('value');
