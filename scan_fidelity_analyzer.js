@@ -99,6 +99,18 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
   constructor(options = {}) {
     super(options);
     this.auditConfig = options.auditConfig || AUDIT_CONFIG;
+    this.onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+  }
+
+  // Only stage names and page counts leave the analyzer; no OCR text, paths or IDs.
+  reportProgress(stage, totalPages, completedPages = 0) {
+    if (typeof this.onProgress !== 'function') return;
+    try {
+      this.onProgress({
+        stage, totalPages: Number.isSafeInteger(totalPages) ? totalPages : null,
+        completedPages: Number.isSafeInteger(completedPages) ? completedPages : 0
+      });
+    } catch (_) { /* Progress listeners cannot interrupt medical-record QA. */ }
   }
 
   failedPage(pageNumber, reason) {
@@ -712,11 +724,14 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
       const totalPages = Number(pdfData.numpages || 0);
       if (!Number.isInteger(totalPages) || totalPages < 1) throw new Error('The PDF contains no readable pages.');
 
+      this.reportProgress('preparing-pages', totalPages);
       const conversion = await this.convertPDFToImages(file.path, outputDir, totalPages, this.auditConfig.dpi);
       const imagePaths = Array.isArray(conversion.image_paths) ? conversion.image_paths : [];
       if (imagePaths.length !== totalPages) throw new Error(`Expected ${totalPages} page images but created ${imagePaths.length}.`);
 
+      this.reportProgress('checking-images', totalPages);
       const metrics = await this.analyzeDeterministicImageMetrics(imagePaths);
+      this.reportProgress('reading-pages', totalPages, 0);
       const pageAnalyses = [];
       const pageContexts = [];
       for (let index = 0; index < totalPages; index += 1) {
@@ -732,8 +747,10 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
         }
         pageAnalyses.push(analysis);
         pageContexts.push({ pageNumber, ocrText: text, analysis });
+        this.reportProgress('reading-pages', totalPages, pageNumber);
       }
 
+      this.reportProgress('checking-record', totalPages, totalPages);
       const textAnalysis = this.combinePageAnalyses(pageAnalyses, totalPages);
       textAnalysis.pageLinkage = await this.classifyContinuationPages(pageContexts, fileName);
       const imageAnalysis = await this.analyzeImagesWithVision(imagePaths, fileName);
@@ -758,6 +775,7 @@ class ScanFidelityAnalyzer extends ComprehensiveAnalyzer {
       const report = this.generateReport(fileName, textAnalysis, imageAnalysis, metrics,
         qaAssessment, totalPages, metadata, internalCompleteness, contentPreservation);
 
+      this.reportProgress('completed', totalPages, totalPages);
       this.log('analysis_completed', { totalPages, pagesFailed: textAnalysis.failedPages.length, qaStatus: qaAssessment.status });
       return { filename: fileName, analysis: report, timestamp: analysisDate };
     } finally {
