@@ -389,15 +389,24 @@ function createReviewFeedback(analysis) {
     return section;
   }
   const selector = el('select', 'review-outcome-select');
+  const hasScanConcern = analysis.qaAssessment?.status === 'review-required';
+  const hasIdentityConcern = analysis.recordAssociation?.status === 'needs-review';
+  const hasFolderReference = analysis.recordAssociation?.basis === 'authoritative-folder';
   const options = [
     ['', 'Select a review outcome'],
     ['no-defect-digital', 'No digitization defect seen — digital inspection'],
-    ['model-false-positive', 'Suspected model false positive — digital inspection'],
-    ['folder-match-verified', 'Folder registration / patient identity verified — digital comparison'],
-    ['folder-mismatch-confirmed', 'Folder registration mismatch confirmed — digital comparison'],
-    ['identity-ocr-false-positive', 'Identity mismatch was an OCR error — digital comparison'],
-    ['source-issue-confirmed', 'Source-paper issue confirmed — paper compared'],
-    ['scan-defect-confirmed', 'Scanning defect confirmed — paper compared'],
+    ...(hasScanConcern ? [
+      ['model-false-positive', 'Suspected model false positive — digital inspection'],
+      ['source-issue-confirmed', 'Source-paper issue confirmed — paper compared'],
+      ['scan-defect-confirmed', 'Scanning defect confirmed — paper compared']
+    ] : []),
+    ...(hasIdentityConcern || hasFolderReference ? [
+      ['folder-match-verified', 'Folder registration / patient identity verified — digital comparison'],
+      ...(hasIdentityConcern ? [
+        ['folder-mismatch-confirmed', 'Folder registration mismatch confirmed — digital comparison'],
+        ['identity-ocr-false-positive', 'Identity mismatch was an OCR error — digital comparison']
+      ] : [])
+    ] : []),
     ['inconclusive', 'Inconclusive — further review needed']
   ];
   for (const [value, label] of options) {
