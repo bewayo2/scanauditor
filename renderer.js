@@ -63,6 +63,12 @@ function showLoading(show) {
   analyzeFilesBtn.disabled = show;
   selectFilesBtn.disabled = show;
   clearFilesBtn.disabled = show;
+  if (show) {
+    byId('loading-progress-label').textContent = 'Preparing the selected PDF…';
+    byId('loading-progress-bar').removeAttribute('value');
+    byId('individual-progress').hidden = false;
+    byId('individual-progress-bar').removeAttribute('value');
+  }
 }
 
 function addFiles(files) {
@@ -154,8 +160,14 @@ async function analyzeSelectedFiles() {
     });
     analysisResults = Array.isArray(response?.results) ? response.results : [];
     displayResults();
-    showNotification(`Automated QA completed for ${analysisResults.length} file(s).`, 'success');
-    refreshAuditProjects().catch(() => {});
+    byId('audit-status-filter').value = 'all';
+    byId('audit-review-filter').value = 'all';
+    await refreshAuditProjects(response?.projectId);
+    byId('audit-status-filter').value = 'all';
+    byId('audit-review-filter').value = 'all';
+    await refreshAuditQueue();
+    byId('audit-workspace').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    showNotification(`Automated QA completed for ${analysisResults.length} file(s). Open a record in the review queue.`, 'success');
   } catch (error) {
     showNotification(`Automated QA failed: ${error.message}`, 'error');
   } finally {
@@ -198,9 +210,9 @@ function displayResults() {
   );
   resultsSummary.appendChild(summary);
 
-  analysisResults.forEach(result => resultsDetails.appendChild(createResultCard(result)));
+  // All findings and human decisions live in the indexed Review Queue.
+  // Avoid a competing per-file review interface below the audit workspace.
   resultsSection.style.display = 'block';
-  resultsSection.scrollIntoView({ behavior: 'smooth' });
 }
 
 function createDetail(label, value, extraClass = '') {
@@ -393,11 +405,12 @@ function createReviewFeedback(analysis) {
     option.value = value;
     selector.appendChild(option);
   }
-  const reviewer = el('input', 'review-outcome-select');
-  reviewer.type = 'text';
-  reviewer.maxLength = 120;
-  reviewer.placeholder = 'Reviewer name or staff ID (not authenticated)';
-  reviewer.setAttribute('aria-label', 'Reviewer name or staff ID (not authenticated)');
+  const fallbackReviewer = el('input', 'review-outcome-select');
+  fallbackReviewer.type = 'text';
+  fallbackReviewer.maxLength = 120;
+  fallbackReviewer.placeholder = 'Reviewer name or staff ID (not authenticated)';
+  fallbackReviewer.setAttribute('aria-label', 'Reviewer name or staff ID (not authenticated)');
+  const reviewer = analysis.workspaceDocumentId ? byId('audit-action-reviewer') : fallbackReviewer;
   const save = el('button', 'btn btn-secondary', 'Save Review Outcome');
   save.type = 'button';
   const feedback = el('p', 'small-note', 'No human review outcome recorded for this file.');
@@ -427,7 +440,9 @@ function createReviewFeedback(analysis) {
       (options.find(([key]) => key === existing.outcome)?.[1] || existing.outcome) +
       ' (' + existing.comparisonBasis + ').';
   }).catch(() => {});
-  section.append(selector, reviewer, save, feedback);
+  section.appendChild(selector);
+  if (!analysis.workspaceDocumentId) section.appendChild(fallbackReviewer);
+  section.append(save, feedback);
   return section;
 }
 
@@ -1022,6 +1037,19 @@ function renderAuditHistory(record) {
 async function openAuditDocument(documentId) {
   const record = await window.electronAPI.auditGetDocument(documentId);
   if (!record) throw new Error('Document unavailable');
+  byId('audit-recommendations').open = false;
+  const qaNeedsReview = record.qa_status === 'review-required';
+  const identityNeedsReview = record.association_status === 'needs-review';
+  const guidance = identityNeedsReview && qaNeedsReview
+    ? 'This record has both scan-quality and identity concerns. An appropriate next step may be paper comparison or filing investigation.'
+    : identityNeedsReview
+      ? 'An identity or filing investigation may be appropriate; a rescan is not automatically indicated.'
+      : qaNeedsReview
+        ? 'A comparison with the original paper may help confirm whether scanning introduced a defect. Request a rescan only after confirming it is needed.'
+        : record.qa_status === 'analysis-failed'
+          ? 'The analysis did not complete. Reanalysis is available under advanced actions; you do not have to make a corrective recommendation.'
+          : 'No automated finding requires a corrective recommendation. You may record a spot-check outcome without selecting an action.';
+  byId('audit-recommendation-guidance').textContent = guidance;
   auditQueueState.detailId = record.id;
   const detail = byId('audit-record-detail');
   detail.hidden = false;
@@ -1056,6 +1084,9 @@ async function reanalyzeSelectedCase() {
   if (!window.confirm('Reanalyze this PDF? The result and API spend may change. Earlier evidence and review events remain on record.')) return;
   try {
     byId('audit-reanalyze').disabled = true;
+    byId('reanalyze-progress').hidden = false;
+    byId('reanalyze-progress-bar').removeAttribute('value');
+    byId('reanalyze-progress-label').textContent = 'Reanalyzing the scanned PDF…';
     await window.electronAPI.auditReanalyzeDocument({
       documentId: id, hospitalApproved: hospitalApproved.checked
     });
@@ -1067,6 +1098,7 @@ async function reanalyzeSelectedCase() {
     showNotification('Could not reanalyze the record. Check local source and authorization.', 'error');
   } finally {
     byId('audit-reanalyze').disabled = false;
+    byId('reanalyze-progress').hidden = true;
   }
 }
 async function exportToExcel() {
@@ -1110,7 +1142,9 @@ async function updateStatusIndicators() {
 
 
 function showCloudControls() {
-  cloudSettings.hidden = analysisMode.value === 'local';
+  const isLocal = analysisMode.value === 'local';
+  cloudSettings.hidden = isLocal;
+  byId('cloud-spending-limit').hidden = isLocal;
   refreshCostDashboard().catch(() => {});
 }
 
@@ -1360,10 +1394,6 @@ byId('audit-identity-task').addEventListener('click', () => auditAction('investi
 byId('audit-rescan-task').addEventListener('click', () => auditAction('rescan'));
 byId('audit-paper-task').addEventListener('click', () => auditAction('paper-comparison'));
 byId('audit-reanalyze').addEventListener('click', reanalyzeSelectedCase);
-byId('bulk-review-queue').addEventListener('click', async () => {
-  try { await refreshAuditProjects(); byId('audit-workspace').scrollIntoView({ behavior: 'smooth' }); }
-  catch (_) { showNotification('Could not load the review queue.', 'error'); }
-});
 byId('bulk-folder').addEventListener('click', selectBulkFolder);
 byId('bulk-start').addEventListener('click', startBulkAudit);
 byId('bulk-stop').addEventListener('click', stopBulkAudit);
