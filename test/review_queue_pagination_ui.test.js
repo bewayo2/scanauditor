@@ -43,7 +43,7 @@ test('large review queues use scrollable bounded pages instead of an unbounded l
 });
 
 test('review queue recovers from empty last pages as cases are resolved', () => {
-  assert.match(renderer, /const lastAvailablePage = Math\\.max/);
-  assert.match(renderer, /auditQueueState\\.page = lastAvailablePage/);
-  assert.match(renderer, /return refreshAuditQueue\\(\\)/);
+  assert.match(renderer, /const lastAvailablePage = Math\.max/);
+  assert.match(renderer, /auditQueueState\.page = lastAvailablePage/);
+  assert.match(renderer, /return refreshAuditQueue\(\)/);
 });
