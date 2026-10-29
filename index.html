@@ -138,7 +138,8 @@
           <strong id="audit-case-total">No project selected</strong>
           <span id="audit-queue-stats">Results load in small pages, even for 100,000+ documents.</span>
         </div>
-        <div class="audit-queue-table-wrap">
+        <p class="audit-queue-navigation-help" id="audit-queue-navigation-help">Review up to 50 records per page. Scroll within the table to see more rows, or use Previous and Next for more results.</p>
+        <div class="audit-queue-table-wrap" id="audit-queue-scroll" role="region" aria-label="Scrollable review queue" aria-describedby="audit-queue-navigation-help" tabindex="0">
           <table class="audit-queue-table" aria-label="Audited document review queue">
             <thead><tr><th scope="col">Record</th><th scope="col">Pages</th>
               <th scope="col">Overall audit</th><th scope="col">Scan quality</th>
@@ -148,11 +149,13 @@
             <tbody id="audit-queue-rows"><tr><td colspan="8">Select an audit project to view records.</td></tr></tbody>
           </table>
         </div>
-        <div class="audit-queue-pagination">
-          <button id="audit-previous" class="btn btn-secondary" type="button" disabled>Previous</button>
-          <span id="audit-page-label">Page 1</span>
-          <button id="audit-next" class="btn btn-secondary" type="button" disabled>Next</button>
-        </div>
+        <nav class="audit-queue-pagination" aria-label="Review queue pages">
+          <span id="audit-page-label" role="status" aria-live="polite">No records loaded</span>
+          <div class="audit-queue-page-buttons">
+            <button id="audit-previous" class="btn btn-secondary" type="button" disabled>Previous</button>
+            <button id="audit-next" class="btn btn-secondary" type="button" disabled>Next</button>
+          </div>
+        </nav>
         <section id="audit-record-detail" class="audit-record-detail" aria-labelledby="audit-detail-heading" hidden>
           <div class="audit-detail-header">
             <h3 id="audit-detail-heading">Record Review</h3>
