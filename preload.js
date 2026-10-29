@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   auditOpenPdf: id => ipcRenderer.invoke('audit-open-pdf', id),
   auditReanalyzeDocument: request => ipcRenderer.invoke('audit-reanalyze-document', request),
   auditExportSummary: projectId => ipcRenderer.invoke('audit-export-summary', projectId),
+  auditExportCompleteExcel: projectId => ipcRenderer.invoke('audit-export-complete-excel', projectId),
   auditExportEvidence: documentId => ipcRenderer.invoke('audit-export-evidence', documentId),
   auditExportRecordExcel: documentId => ipcRenderer.invoke('audit-export-record-excel', documentId),
   auditBackupDatabase: () => ipcRenderer.invoke('audit-backup-database')
