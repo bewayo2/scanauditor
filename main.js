@@ -354,6 +354,28 @@ ipcMain.handle('audit-export-summary', async (_event, projectId) => {
   if (chosen.canceled || !chosen.filePath) return { canceled: true };
   return (await getWorkspace()).exportQueue(projectId, chosen.filePath);
 });
+ipcMain.handle('audit-export-complete-excel', async (_event, projectId) => {
+  if (activeBulk || activeAnalysis || activeBulkPreview) {
+    throw new Error('Stop scans before exporting a consistent audit history.');
+  }
+  const workspace = await getWorkspace();
+  const projects = await workspace.listProjects();
+  if (!projects.some(item => item.id === projectId)) throw new Error('Audit project unavailable');
+  const confirmation = await dialog.showMessageBox(mainWindow, {
+    type: 'warning', buttons: ['Cancel', 'Export Complete Excel Report'],
+    defaultId: 0, cancelId: 0, noLink: true,
+    message: 'Export complete audit history with patient-identifying information?',
+    detail: 'This workbook includes local filenames and paths, findings, staff-entered reviewer identities, decisions and corrective-action histories. Save only to hospital-approved encrypted storage. It does not authorize paper destruction.'
+  });
+  if (confirmation.response !== 1) return { canceled: true };
+  const chosen = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export complete project audit report (sensitive)',
+    defaultPath: 'ScanAuditor_Complete_Audit_Report.xlsx',
+    filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }]
+  });
+  if (chosen.canceled || !chosen.filePath) return { canceled: true };
+  return workspace.exportCompleteExcel(projectId, chosen.filePath);
+});
 ipcMain.handle('audit-backup-database', async () => {
   if (activeBulk || activeAnalysis || activeBulkPreview) throw new Error('Stop scans before backing up.');
   const confirmation = await dialog.showMessageBox(mainWindow, {
