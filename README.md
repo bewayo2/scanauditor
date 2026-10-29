@@ -68,6 +68,14 @@ The main workflow is **Resumable Folder Audit → Audit Projects & Review Queue 
 
 **Security:** The SQLite database contains source paths, detailed analysis and potentially patient identifiers. It is not encrypted on its own, is designed for one hospital-controlled workstation, and must reside on an encrypted/managed local disk. CSV exports and backups require an explicit warning. It does not grant paper-disposal authorization. See [PRESERVATION_QA.md](PRESERVATION_QA.md) for deployment/retention cautions.
 
+## Complete project audit report (Excel)
+
+Under **Audit Projects & Review Queue → Reports, backup and administration**, select **Export Complete Audit Report (Excel)** to generate a single workbook covering **the entire selected project**, not just its currently visible 50-row queue page. The workbook is generated directly from the local SQLite workspace without rerunning AI analysis or transmitting files externally.
+
+The report contains eight areas: Executive Summary, Record Register (current state of each PDF), Current Findings (including page references), Analysis Runs (all analysis/reanalysis revisions), Run Findings History (past categorical findings from stored evidence), Human Review Decisions (including superseded decisions), Corrective Actions, and Action History (every recorded status change). Large tables are streamed and split into additional Excel worksheets when they reach Excel's row limit. An empty history is left as a header-only sheet rather than silently omitted.
+
+**Interpretation and security:** Current findings represent the latest assessment and can differ from earlier run evidence. Reviewer identities are staff-entered, not authenticated. Paper comparison is a reviewer's recorded basis and not independently validated proof of original-paper completeness. Neither a passed result nor this report authorizes paper disposal. This export includes identifying source paths, filenames, reviewer labels and findings; its explicit warning requires saving only to approved, encrypted hospital storage. Local exports are not automatic backups.
+
 ## Optional OpenAI models and costing
 
 The user can select **Local only**, **GPT-6 Luna with GPT-6.1 Sol fallback**, or **GPT-6 Astra benchmark**. One cloud multimodal request per page extracts text, patient fields, dates, and quality observations. The app only sends medical images externally when cloud mode is explicitly selected, an API key has been entered, and hospital authorization is confirmed. The API key is kept in memory for this session, not persisted.
