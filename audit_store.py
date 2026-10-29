@@ -12,6 +12,7 @@ import json
 import os
 import sqlite3
 import sys
+from audit_xlsx import export_complete_audit
 
 OUTCOMES = {
     "no-defect-digital": "digital-only",
@@ -631,6 +632,11 @@ def export_queue(db, a):
     return {"rows":count}
 
 
+def export_complete_excel(db, a):
+    project_id, destination = a.get("projectId"), a.get("destination")
+    return export_complete_audit(db, project_id, destination)
+
+
 def backup_database(db, a):
     destination = a.get("destination")
     if not valid_string(destination,4096):
@@ -658,6 +664,7 @@ HANDLERS = {
     "createAction": create_action,
     "updateAction": update_action,
     "exportQueue": export_queue,
+    "exportCompleteExcel": export_complete_excel,
     "backupDatabase": backup_database,
 }
 
