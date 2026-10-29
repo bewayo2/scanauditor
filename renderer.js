@@ -1046,8 +1046,12 @@ async function refreshAuditQueue() {
     ' document preparation / identity findings · ' + queueFormat(summary.analysis_failed) +
     ' analysis failed · ' + queueFormat(summary.reviewed) + ' manual reviews recorded';
   const pages = Math.max(1, Math.ceil(data.total / data.limit));
-  byId('audit-page-label').textContent = 'Page ' + data.page + ' of ' + pages +
-    ' · ' + queueFormat(data.total) + ' matching records';
+  const from = data.total > 0 ? (data.page - 1) * data.limit + 1 : 0;
+  const to = data.total > 0 ? Math.min(data.page * data.limit, data.total) : 0;
+  byId('audit-page-label').textContent = data.total
+    ? 'Showing ' + queueFormat(from) + '–' + queueFormat(to) + ' of ' +
+      queueFormat(data.total) + ' matching records · Page ' + data.page + ' of ' + pages
+    : 'No matching records · Page 1 of 1';
   byId('audit-previous').disabled = data.page <= 1;
   byId('audit-next').disabled = data.page >= pages;
 }
@@ -1416,13 +1420,25 @@ for (const id of ['audit-search']) {
     }
   });
 }
+// Keep the bounded 50-row table at its top when navigating between pages.
+async function changeAuditQueuePage(targetPage) {
+  const previousPage = auditQueueState.page;
+  if (targetPage === previousPage) return;
+  auditQueueState.page = targetPage;
+  try {
+    await refreshAuditQueue();
+    byId('audit-queue-scroll').scrollTop = 0;
+    byId('audit-queue-scroll').scrollLeft = 0;
+  } catch (_) {
+    auditQueueState.page = previousPage;
+    showNotification('Could not load that page of review records.', 'error');
+  }
+}
 byId('audit-next').addEventListener('click', () => {
-  auditQueueState.page += 1;
-  refreshAuditQueue().catch(() => { auditQueueState.page -= 1; });
+  changeAuditQueuePage(auditQueueState.page + 1);
 });
 byId('audit-previous').addEventListener('click', () => {
-  auditQueueState.page = Math.max(1, auditQueueState.page - 1);
-  refreshAuditQueue().catch(() => {});
+  changeAuditQueuePage(Math.max(1, auditQueueState.page - 1));
 });
 byId('audit-export-summary').addEventListener('click', async () => {
   const projectId = byId('audit-project').value;
