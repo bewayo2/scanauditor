@@ -1451,6 +1451,23 @@ byId('audit-next').addEventListener('click', () => {
 byId('audit-previous').addEventListener('click', () => {
   changeAuditQueuePage(Math.max(1, auditQueueState.page - 1));
 });
+byId('audit-export-complete').addEventListener('click', async () => {
+  const projectId = byId('audit-project').value;
+  if (!projectId) return showNotification('Select an audit project first.', 'warning');
+  const button = byId('audit-export-complete');
+  button.disabled = true;
+  try {
+    const result = await window.electronAPI.auditExportCompleteExcel(projectId);
+    if (result?.saved) {
+      showNotification('Complete Excel report saved for ' +
+        queueFormat(result.rows) + ' indexed records.', 'success');
+    }
+  } catch (_) {
+    showNotification('Could not export the complete audit report. Check approved storage and free disk space.', 'error');
+  } finally {
+    button.disabled = false;
+  }
+});
 byId('audit-export-summary').addEventListener('click', async () => {
   const projectId = byId('audit-project').value;
   if (!projectId) return;

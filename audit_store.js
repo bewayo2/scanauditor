@@ -110,6 +110,9 @@ class AuditStore {
     return this.call('updateAction', { actionId, status, reviewerLabel });
   }
   exportQueue(projectId, destination) { return this.call('exportQueue', { projectId, destination }); }
+  exportCompleteExcel(projectId, destination) {
+    return this.call('exportCompleteExcel', { projectId, destination });
+  }
   backupDatabase(destination) { return this.call('backupDatabase', { destination }); }
 
   async close() {
