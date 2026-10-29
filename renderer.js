@@ -971,6 +971,9 @@ async function refreshAuditProjects(preferredId = null) {
     selector.appendChild(option);
     byId('audit-case-total').textContent = 'No audit records yet';
     byId('audit-queue-stats').textContent = 'Start a folder audit to create an indexed review project.';
+    byId('audit-page-label').textContent = 'No records loaded';
+    byId('audit-previous').disabled = true;
+    byId('audit-next').disabled = true;
     byId('audit-queue-rows').replaceChildren();
     return;
   }
@@ -1004,6 +1007,14 @@ async function refreshAuditQueue() {
     window.electronAPI.auditListDocuments(params),
     window.electronAPI.auditSummary(projectId)
   ]);
+  // Reviewing cases can shrink the pending queue while someone is on its
+  // last page. Navigate to the final remaining page rather than showing an
+  // empty page that appears to have lost all of the remaining cases.
+  const lastAvailablePage = Math.max(1, Math.ceil(data.total / data.limit));
+  if (data.page > lastAvailablePage) {
+    auditQueueState.page = lastAvailablePage;
+    return refreshAuditQueue();
+  }
   auditQueueState.total = data.total;
   const tbody = byId('audit-queue-rows');
   tbody.replaceChildren();
