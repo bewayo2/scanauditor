@@ -133,7 +133,6 @@ class WorkbookWriter:
                     raw.write(text.encode('utf-8'))
                 put('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">')
-                put(f'<dimension ref="A1:{colref(len(columns)-1)}1"/>')
                 put('<sheetViews><sheetView workbookViewId="0">'
                     '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
                     '</sheetView></sheetViews>')
@@ -211,9 +210,14 @@ def historic_findings(db, pid):
     for doc_id, name, revision, stamp, status, evidence in rows:
         try:
             qa = json.loads(evidence).get("qa") or {}
-            for source, kind in (("findings", "Review finding"),
-                                 ("informational", "Informational")):
-                for finding in qa.get(source) or []:
+            association = json.loads(evidence).get("recordAssociation") or {}
+            for collection, key, kind in (
+                (qa, "findings", "Review finding"),
+                (qa, "informational", "Informational"),
+                (association, "findings", "Identity / filing alert"),
+                (association, "observations", "Identity observation")
+            ):
+                for finding in collection.get(key) or []:
                     if not isinstance(finding, dict):
                         continue
                     code = finding.get("code")
@@ -341,7 +345,8 @@ def export_complete_audit(db, project_id, destination):
                     r.reviewer_label,r.timestamp,r.revision,
                     CASE WHEN d.review_outcome IS NOT NULL AND r.id=(
                       SELECT max(r2.id) FROM review_events r2 WHERE r2.document_id=d.id)
-                      AND r.revision=d.revision THEN 'Current' ELSE 'Historical / superseded' END
+                      AND d.review_outcome=r.outcome AND d.reviewed_at=r.timestamp
+                      THEN 'Current' ELSE 'Historical / superseded' END
                     FROM review_events r JOIN documents d ON d.id=r.document_id
                     WHERE d.project_id=? ORDER BY r.id""", (project_id,)),
                 [13, 40, 31, 22, 26, 28, 12, 26])
