@@ -1010,7 +1010,37 @@ body {
 .audit-queue-table th { background: #edf2f8; color: #31425a; position: sticky; top: 0; z-index: 1; }
 .audit-queue-table tr:hover td { background: #f8faff; }
 .audit-queue-table .btn { padding: 7px 12px; min-height: 36px; }
-.audit-queue-pagination { margin-top: 14px; display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 12px; }
+/* A high-contrast, bounded review workspace, even on the purple app surface. */
+.audit-queue-navigation-help {
+  color: #fff; font-size: 14px; line-height: 1.5; margin: 8px 0 10px;
+}
+.audit-queue-table-wrap:focus-visible {
+  outline: 3px solid #c6d6fb; outline-offset: 3px;
+}
+.audit-queue-pagination {
+  margin-top: 12px; padding: 14px 16px;
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 12px;
+  background: #f2f5fa; border: 1px solid #cbd6e6;
+  border-radius: 10px; color: #24334a;
+}
+.audit-queue-pagination #audit-page-label {
+  color: #24334a; font-weight: 650; font-size: 14px;
+  line-height: 1.5; font-variant-numeric: tabular-nums;
+}
+.audit-queue-page-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.audit-queue-pagination .btn {
+  min-height: 40px; padding: 9px 16px;
+  background: #e2e8f0; color: #29384e; font-weight: 650;
+}
+.audit-queue-pagination .btn:enabled:hover { background: #d0dbec; }
+.audit-queue-pagination .btn:disabled {
+  background: #e9edf3; border: 1px solid #d5dce7;
+  color: #5b6677; opacity: 1; cursor: not-allowed;
+}
+.audit-queue-pagination .btn:focus-visible {
+  outline: 3px solid #425ba3; outline-offset: 2px;
+}
 .audit-record-detail {
   margin-top: 28px; padding: 20px; border: 1px solid #cad6e5;
   border-radius: 12px; background: #f9fbfd;
@@ -1039,6 +1069,8 @@ body {
 @media (max-width: 650px) {
   .audit-record-detail { padding: 12px; }
   .audit-queue-pagination { justify-content: flex-start; }
+  .audit-queue-page-buttons { width: 100%; }
+  .audit-queue-page-buttons .btn { flex: 1; justify-content: center; }
 }
 
 /* High-contrast audit workspace: these controls sit directly on the purple
